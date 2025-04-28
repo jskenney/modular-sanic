@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+
+ <meta charset="utf-8">
+ <meta name="viewport"  content="width=device-width, initial-scale=1">
+
+ <link rel="icon"       href="/favicon.ico">
+ <link rel="stylesheet" href="/uikit/uikit.min.css">
+
+ <script src="/uikit/uikit.min.js"></script>
+ <script src="/uikit/uikit-icons.min.js"></script>
+ <script src="/uikit/jquery.js"></script>
+
+ <title>Site Logon</title>
+
+</head>
+<body class="uk-flex uk-flex-center uk-flex-middle uk-background-muted uk-height-viewport" data-uk-height-viewport>
+ <div class="uk-section uk-section-muted uk-flex uk-flex-middle uk-animation-fade" uk-height-viewport uk-animation-fade>
+  <div class="uk-width-1-1">
+   <div class="uk-container">
+    <div class="uk-grid-margin uk-grid uk-grid-stack" uk-grid>
+     <div class="uk-width-5-6 uk-margin-auto">
+      <div class="uk-card uk-card-default uk-card-large uk-grid-collapse uk-child-width-1-2@s uk-margin uk-border-rounded uk-position-relative uk-overflow-hidden" uk-grid>
+       <div class="uk-flex-last@s uk-card-media-right uk-cover-container">
+        <img src="/auth/logon/logo.webp" alt="" id="logo" uk-cover>
+        <canvas width="600" height="400"></canvas>
+       </div>
+       <div>
+        <div class="uk-card-body">
+         <form id="loginform">
+          <div class="uk-margin">
+           <div class="uk-inline uk-width-1-1">
+            <center><span class="uk-icon" uk-icon="icon: user; ratio: 4"></span></center>
+           </div>
+          </div>
+          <div class="uk-margin">
+           <div class="uk-inline uk-width-1-1">
+            <span class="uk-form-icon" uk-icon="icon: user"></span>
+            <input class="uk-input uk-form" id="inputUsername" type="text" placeholder="Username" required autofocus>
+           </div>
+          </div>
+          <div class="uk-margin">
+           <div class="uk-inline uk-width-1-1">
+            <span class="uk-form-icon" uk-icon="icon: lock"></span>
+            <input class="uk-input uk-form" id="inputPassword" type="password" placeholder="Password" required>
+           </div>
+          </div>
+          <div class="uk-margin">
+           <div class="uk-form-controls">
+            <button class="uk-button uk-button-primary uk-width-1-1" id="sbutton">Sign in</button>
+           </div>
+          </div>
+         </form>
+        </div>
+       </div>
+      </div>
+     </div>
+    </div>
+   </div>
+  </div>
+ </div>
+ <div id="sanic-modal" uk-modal>
+    <div class="uk-modal-dialog">
+        <button class="uk-modal-close-default" type="button" uk-close></button>
+        <div id="sanic-modal-contents" class="uk-modal-body" uk-overflow-auto>...</div>
+        <div class="uk-modal-footer uk-text-right">
+            <button id="ack" class="uk-button uk-button-primary uk-modal-close" type="button">Acknowledge</button>
+        </div>
+    </div>
+ </div>
+ <script type='text/javascript'>
+
+   $("#loginform").submit(function(e){
+    var username = $('#inputUsername').val();
+    var password = $('#inputPassword').val();
+    $('#inputPassword').val('****');
+    $('#sbutton').text('verifying');
+    $('#sbutton').prop('disabled', true);
+    $('#inputUsername').prop('disabled', true);
+    $('#inputPassword').prop('disabled', true);
+    $.ajax({
+      url: '/auth/pam',
+      method: 'POST',
+      data: {
+          username: username,
+          password: password
+        },
+      success: function(result) {
+        if (result['success']) {
+          document.location = result['data']['redirect'];
+        } else {
+          $('#sbutton').text('sign in');
+          $('#sbutton').prop('disabled', false);
+          $('#inputUsername').prop('disabled', false);
+          $('#inputPassword').prop('disabled', false);
+          $('#inputPassword').val('');
+          $('#inputPassword').focus();
+        }
+      }
+    });
+    e.preventDefault();
+  });
+
+  $.ajax({
+    url: '/auth/info',
+    method: 'GET',
+    success: function(result) {
+      if (result['success']) {
+        document.location = result['data']['redirect'];
+      }
+      if (result['data']['logo'] != '/auth/logon/logo.webp') {
+        $('#logo').attr("src", result['data']['logo']);
+      }
+      if (result['data']['page_title'] && result['data']['page_title'] != '') {
+        document.title = result['data']['page_title'];
+      }
+      if (result['data']['message'] && result['data']['message'] != '') {
+        $('#sanic-modal-contents').html(result['data']['message']);
+        UIkit.modal("#sanic-modal").toggle();
+        $('#ack').focus();
+      }
+    }
+  });
+
+  $('#sanic-modal').on({
+    'hide.uk.modal': function(){
+       $('#inputUsername').focus();
+    }
+  });
+
+ </script>
+</body>
+</html>

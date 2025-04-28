@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+
+ <meta charset="utf-8">
+ <meta name="viewport"  content="width=device-width, initial-scale=1">
+
+ <link rel="icon"       href="/favicon.ico">
+ <link rel="stylesheet" href="/uikit/uikit.min.css">
+
+ <script src="/uikit/uikit.min.js"></script>
+ <script src="/uikit/uikit-icons.min.js"></script>
+ <script src="/uikit/jquery.js"></script>
+
+ <title>Site Logon</title>
+
+</head>
+<body class="uk-flex uk-flex-center uk-flex-middle uk-background-muted uk-height-viewport" data-uk-height-viewport>
+ <div class="uk-section uk-section-muted uk-flex uk-flex-middle uk-animation-fade" uk-height-viewport uk-animation-fade>
+  <div class="uk-width-1-1">
+   <div class="uk-container">
+    <div class="uk-grid-margin uk-grid uk-grid-stack" uk-grid>
+     <div class="uk-width-5-6 uk-margin-auto">
+      <div class="uk-card uk-card-default uk-card-large uk-grid-collapse uk-child-width-1-2@s uk-margin uk-border-rounded uk-position-relative uk-overflow-hidden" uk-grid>
+       <div class="uk-flex-last@s uk-card-media-right uk-cover-container">
+        <img src="/auth/logon/logo.webp" alt="" id="logo" uk-cover>
+        <canvas width="600" height="400"></canvas>
+       </div>
+       <div>
+        <div class="uk-card-body">
+         <form id="loginform">
+          <div class="uk-margin">
+           <div class="uk-inline uk-width-1-1">
+            <center><span class="uk-icon" uk-icon="icon: user; ratio: 4"></span></center>
+           </div>
+          </div>
+          <div class="uk-margin">
+           <div class="uk-inline uk-width-1-1">
+            <span class="uk-form-icon" uk-icon="icon: user"></span>
+            <input class="uk-input uk-form" id="inputUsername" type="text" placeholder="Username" required autofocus>
+           </div>
+          </div>
+          <div class="uk-margin">
+           <div class="uk-form-controls">
+            <button class="uk-button uk-button-primary uk-width-1-1" id="sbutton">Switch User</button>
+           </div>
+          </div>
+         </form>
+        </div>
+       </div>
+      </div>
+     </div>
+    </div>
+   </div>
+  </div>
+ </div>
+ <div id="sanic-modal" uk-modal>
+    <div class="uk-modal-dialog">
+        <button class="uk-modal-close-default" type="button" uk-close></button>
+        <div id="sanic-modal-contents" class="uk-modal-body" uk-overflow-auto>...</div>
+        <div class="uk-modal-footer uk-text-right">
+            <button id="ack" class="uk-button uk-button-primary uk-modal-close" type="button">Acknowledge</button>
+        </div>
+    </div>
+ </div>
+ <script type='text/javascript'>
+
+   $("#loginform").submit(function(e){
+    var username = $('#inputUsername').val();
+    $('#sbutton').text('verifying');
+    $('#sbutton').prop('disabled', true);
+    $('#inputUsername').prop('disabled', true);
+    $('#inputPassword').prop('disabled', true);
+    $.ajax({
+      url: '/auth/su',
+      method: 'POST',
+      dataType: 'json',
+      contentType : 'application/json',
+      data: JSON.stringify({ username: username }),
+      success: function(result) {
+        if (result['success']) {
+          document.location = result['data']['redirect'];
+        } else {
+          $('#sbutton').text('system failure');
+          $('#sanic-modal-contents').html('Failure in attempt to switch users.');
+          UIkit.modal("#sanic-modal").toggle();
+        }
+      }
+    });
+    e.preventDefault();
+  });
+
+  $.ajax({
+    url: '/auth/info',
+    method: 'GET',
+    success: function(result) {
+      if (!result['success'] || !result['data'].hasOwnProperty('access') || !result['data']['access'].hasOwnProperty('admin') || !result['data']['access']['admin'].includes('become')) {
+        $('#sbutton').text('access denied');
+        $('#sbutton').prop('disabled', true);
+        $('#inputUsername').prop('disabled', true);
+        $('#inputPassword').prop('disabled', true);
+        $('#sanic-modal-contents').html('You must be logged in as an administrator to use this feature.');
+        UIkit.modal("#sanic-modal").toggle();
+      }
+      if (result['data']['logo'] != '/auth/logon/logo.webp') {
+        $('#logo').attr("src", result['data']['logo']);
+      }
+      if (result['data']['page_title'] && result['data']['page_title'] != '') {
+        document.title = result['data']['page_title'];
+      }
+    }
+  });
+
+ </script>
+</body>
+</html>

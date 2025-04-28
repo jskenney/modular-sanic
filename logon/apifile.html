@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+
+ <meta charset="utf-8">
+ <meta name="viewport"  content="width=device-width, initial-scale=1">
+
+ <link rel="icon"       href="/favicon.ico">
+ <link rel="stylesheet" href="/uikit/uikit.min.css">
+
+ <script src="/uikit/uikit.min.js"></script>
+ <script src="/uikit/uikit-icons.min.js"></script>
+ <script src="/uikit/jquery.js"></script>
+
+ <title>Site Logon</title>
+
+</head>
+<body class="uk-flex uk-flex-center uk-flex-middle uk-background-muted uk-height-viewport" data-uk-height-viewport>
+ <div class="uk-section uk-section-muted uk-flex uk-flex-middle uk-animation-fade" uk-height-viewport uk-animation-fade>
+  <div class="uk-width-1-1">
+   <div class="uk-container">
+    <div class="uk-grid-margin uk-grid uk-grid-stack" uk-grid>
+     <div class="uk-width-5-6 uk-margin-auto">
+      <div class="uk-card uk-card-default uk-card-large uk-grid-collapse uk-child-width-1-2@s uk-margin uk-border-rounded uk-position-relative uk-overflow-hidden" uk-grid>
+       <div class="uk-flex-last@s uk-card-media-right uk-cover-container">
+        <img src="/auth/logon/logo.webp" alt="" id="logo" uk-cover>
+        <canvas width="600" height="400"></canvas>
+       </div>
+       <div>
+        <div class="uk-card-body">
+         <form id="loginform">
+          <div class="uk-margin">
+           <div class="uk-inline uk-width-1-1">
+            <center><span class="uk-icon" uk-icon="icon: user; ratio: 4"></span></center>
+           </div>
+          </div>
+
+           <div class="js-upload uk-placeholder uk-text-center">
+             <span uk-icon="icon: cloud-upload"></span>
+             <span class="uk-text-middle">Drag API file here</span>
+             <div uk-form-custom>
+                 <input type="file" multiple>
+                 <span class="uk-link">or select manually.</span>
+             </div>
+           </div>
+           <progress id="js-progressbar" class="uk-progress" value="0" max="100" hidden></progress>
+
+          </div>
+         </form>
+        </div>
+       </div>
+      </div>
+     </div>
+    </div>
+   </div>
+  </div>
+ </div>
+ <div id="sanic-modal" uk-modal>
+    <div class="uk-modal-dialog">
+        <button class="uk-modal-close-default" type="button" uk-close></button>
+        <div id="sanic-modal-contents" class="uk-modal-body" uk-overflow-auto>...</div>
+        <div class="uk-modal-footer uk-text-right">
+            <button id="ack" class="uk-button uk-button-primary uk-modal-close" type="button">Acknowledge</button>
+        </div>
+    </div>
+ </div>
+ <script type='text/javascript'>
+
+  $.ajax({
+    url: '/auth/info',
+    method: 'GET',
+    success: function(result) {
+      if (result['success']) {
+        document.location = result['data']['redirect'];
+      }
+      if (result['data']['logo'] != '/auth/logon/logo.webp') {
+        $('#logo').attr("src", result['data']['logo']);
+      }
+      if (result['data']['page_title'] && result['data']['page_title'] != '') {
+        document.title = result['data']['page_title'];
+      }
+      if (result['data']['message'] && result['data']['message'] != '') {
+        $('#sanic-modal-contents').html(result['data']['message']);
+        UIkit.modal("#sanic-modal").toggle();
+        $('#ack').focus();
+      }
+    }
+  });
+
+  $('#sanic-modal').on({
+    'hide.uk.modal': function(){
+       $('#inputUsername').focus();
+    }
+  });
+
+  var bar = document.getElementById('js-progressbar');
+
+  UIkit.upload('.js-upload', {
+    url: '/auth/apifile',
+    multiple: false,
+    loadStart: function (e) {
+      bar.removeAttribute('hidden');
+      bar.max = e.total;
+      bar.value = e.loaded;        },
+    progress: function (e) {
+      bar.max = e.total;
+      bar.value = e.loaded;        },
+    loadEnd: function (e) {
+      bar.max = e.total;
+      bar.value = e.loaded;        },
+    completeAll: function () {
+      result = JSON.parse(arguments[0].response);
+      if (result['success']) {
+        document.location = result['data']['redirect'];
+      } else {
+        UIkit.modal.alert(result['error']);
+      }
+    }
+  });
+
+ </script>
+</body>
+</html>
