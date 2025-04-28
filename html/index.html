@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+
+ <meta charset="utf-8">
+ <meta name="viewport"  content="width=device-width, initial-scale=1">
+
+ <link rel="icon"       href="/favicon.ico">
+ <link rel="stylesheet" href="/uikit/uikit.min.css">
+
+ <script src="/uikit/uikit.min.js"></script>
+ <script src="/uikit/uikit-icons.min.js"></script>
+ <script src="/uikit/jquery.js"></script>
+
+ <title>Start Page</title>
+
+</head>
+<body class="uk-flex uk-flex-center uk-flex-middle uk-background-muted " data-uk-height-viewport>
+<pre><h4>Documentation</h4>
+<a href="/docs/swagger">/docs/swagger</a>              - Documentation (Swagger)
+<a href="/docs">/docs</a>                      - Documentation (ReDocs)
+<h4>Authentication</h4>
+<a href="/auth/logon/logon.html">/auth/logon/logon.html</a>     - Website for PAM Authentication                 (will redirect if logged on)
+<a href="/auth/logon/challenge.html">/auth/logon/challenge.html</a> - Website for Email Challenge Authentication     (will redirect if logged on)
+<a href="/auth/logon/apikey.html">/auth/logon/apikey.html</a>    - Website for API Key Authentication             (will redirect if logged on)
+<a href="/auth/logon/apifile.html">/auth/logon/apifile.html</a>   - Website for API Key File Upload Authentication (will redirect if logged on)
+
+<a href="/auth/logon/su.html">/auth/logon/su.html</a>        - Website for Admin SU (Switch User)
+<a href="/auth/logon/return.html">/auth/logon/return.html</a>    - Website for Admin SU Return
+<a href="/auth/logon/logoff.html">/auth/logon/logoff.html</a>    - Website for Logoff
+
+<a href="/auth/key">/auth/key</a>                  - Show User Info
+<a href="/auth/info">/auth/info</a>                 - Show User and Site Info (used on auth websites)
+<a href="/auth/rekey">/auth/rekey</a>                - Reset API Key
+
+/auth/access/list/&lt;user&gt;                    - Lists Accesses (requires admin for other users)
+/auth/access/add/&lt;user&gt;/&lt;access&gt;/&lt;value&gt;    - Add/Modify Access (requires admin)
+/auth/access/remove/&lt;user&gt;/&lt;access&gt;/&lt;value&gt; - Remove Access (requires admin)
+<h4>API Key</h4><p id=akey>Pending jquery response...</p><h4>Logged on User Information</h4><p id=info>Pending jquery response...</p>
+
+</pre>
+<br><br><br>
+<script>
+
+$.ajax({
+  url: '/auth/key',
+  method: 'GET',
+  success: function(result) {
+    $('#info').html(JSON.stringify(result, null, 2));
+    console.log(result);
+    console.log(result['data']['apikey']);
+    $('#akey').html(result['data']['apikey']);
+    if (result['data']['apikey']) {
+      const links = document.querySelectorAll('a[href]');
+      links.forEach(link => {
+        let href = link.getAttribute('href');
+        const newHref = href.replace('/aaaa/', '/'+result['data']['apikey']+'/');
+        if (newHref !== href) {
+          link.setAttribute('href', newHref);
+          link.textContent = link.textContent.replace('<apikey>', result['data']['apikey']);
+        }
+      });
+    }
+  }
+});
+
+</script>
