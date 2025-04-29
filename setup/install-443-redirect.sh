@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# Script will create a redirect so that port 443 redirects to port 8000 (default for Sanic)
+# This will prevent having to run as a superuser or using a non-standard port.
+
 # Make sure that this provides only one response.
 DEST=$(ip a | grep -v inet6 | grep -v 127.0.0.1 | grep inet | tr -s ' ' | cut -d ' ' -f 3 | cut -d '/' -f 1)
 
