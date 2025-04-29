@@ -7,36 +7,37 @@ from sanic_session import Session, MemcacheSessionInterface
 import pam, os, importlib, time, uuid, sys
 
 ###############################################################################
+# Define the possible locations for the config.py file, will be tried in order.
+# Or use the environmental variable SANIC_CONFIG to provide the path and filename
+config_file_locations = ('../config.py', '../site/config.py', './site/config.py', './config.py')
+if 'SANIC_CONFIG_FILE' in os.environ:
+    config_file_locations = [os.environ['SANIC_CONFIG_FILE']]
+
+###############################################################################
 # Import site configs (config.py) from either the site or local directory.
 alt_site = None
-for possible_site in ('../config.py', 'site/config.py', '../site/config.py', './config.py'):
+for possible_site in config_file_locations:
     if alt_site is None and os.path.exists(possible_site):
         alt_site = possible_site
 if alt_site is not None:
     spec = importlib.util.spec_from_file_location("myconfigs", alt_site)
     myconfigs = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(myconfigs)
-    db_settings = myconfigs.db_settings
-    site_settings = myconfigs.site_settings
-    web_settings = myconfigs.web_settings
-    memcached_settings = myconfigs.memcached_settings
-    auth_settings = myconfigs.auth_settings
     print("Notice: Loaded config file from", alt_site)
 else:
-    print("Notice: No configuration file detected, aborting.")
+    print("Notice: No configuration file detected, exiting.")
     sys.exit()
 
 ###############################################################################
 # Create Sanic Application
-app = Sanic(site_settings['NAME'])
+app = Sanic(myconfigs.site_settings['NAME'])
 
 ###############################################################################
 # Loading in settings from config file
-app.config.update(site_settings)
-app.config.update(web_settings)
-app.config.update(memcached_settings)
-app.config.update(db_settings)
-app.config.update(auth_settings)
+for variable in dir(myconfigs):
+    if not variable.startswith('_'):
+        obj = getattr(myconfigs, variable)
+        app.config.update(obj)
 
 ###############################################################################
 # Enable Session Support (Default to Memcached interface)
@@ -57,13 +58,13 @@ app.static("/html/", app.config.HTML, directory_view=app.config.SHOW_SITE_CONTEN
 app.static("/uikit/", "./uikit/", directory_view=app.config.SHOW_SITE_CONTENTS, name='uikit')
 
 ###############################################################################
-# To support HSTS
-if 'HSTS' in site_settings:
-    print("Notice: Set HSTS to", site_settings['HSTS'])
+# To support HSTS, a common organizational security requirement.
+if 'HSTS' in app.config:
+    print("Notice: Set HSTS to", app.config.HSTS)
     @app.middleware("response")
     async def add_hsts_headers(request, response):
         if request.scheme == 'https':
-            response.headers["Strict-Transport-Security"] = "max-age="+site_settings['HSTS']+"; includeSubDomains"
+            response.headers["Strict-Transport-Security"] = "max-age="+app.config.HSTS+"; includeSubDomains"
 
 ###############################################################################
 # Lets try autodiscovery of Endpoints (authentication APIs and site APIs)
