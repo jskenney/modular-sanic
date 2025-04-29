@@ -4,7 +4,7 @@ import asyncio, aiomysql, aiomcache
 from sanic import Sanic, response
 from sanic.response import text, json, html, redirect, empty
 from sanic_session import Session, MemcacheSessionInterface
-import pam, os, importlib, time, uuid, sys
+import pam, os, importlib.util, time, uuid, sys
 
 ###############################################################################
 # Define the possible locations for the config.py file, will be tried in order.
