@@ -1,7 +1,6 @@
-# Sanic Framework Configurations
+# Sanic Framework Configurations, Sample configuration file
 
-# Sample config.file
-
+# Site Specific Settings (location of directories, names, etc.)
 site_settings = {
     'NAME':           "SanicApp_Version_1",  # Title of Application
     'API_LOCATIONS': [
@@ -10,10 +9,10 @@ site_settings = {
                       'api/auth/apikey',     # APIKey and APIFile-Upload Support
                       'api/auth/email'       # Email Challenge Support
                       ],
-    'DEFAULT_SCHOOL': 'XXXX'                 # Default School for Schedules
     #'HSTS':'86400'                          # Use if you want to set HSTS headers
 }
 
+# MySQL Connection Settings
 db_settings = {
     'DB_HOST': '127.0.0.1',                  # MySQL Database Host
     'DB_USER': 'username',                   # MySQL Database User
@@ -22,22 +21,25 @@ db_settings = {
     'DB_PORT':  3306                         # MySQL Port
 }
 
+# Memcached Connection Settings
 memcached_settings = {
     'MEMCACHED_SERVER': '127.0.0.1',         # Memcached Server
     'MEMCACHED_PORT':    11211               # Memcached Port
 }
 
+# Web Page Settings and Locations
 web_settings = {
     'SHOW_SITE_CONTENTS':         True,                       # Allow directory listings
     # The following values are located relative to server.py's filesystem location
     'HTML':                      './html/',                   # Location of html directory
     'INITIAL_PAGE':              './html/index.html',         # Initial start page
     'FAVICON':                   './html/favicon.ico',        # Site icon
-    # The following values are located relative
+    # The following values are located depending on system configurations and are
+    # NOT relative to the location of server.py.
     'REDIRECT_LOGON_SUCCESSFUL': '/html/index.html',          # Redirect after successful logon
     'REDIRECT_LOGON_FAILED':     '/auth/logon/apifile.html',  # Redirect after unsuccessful logon
     'REDIRECT_LOGOFF':           '/html/index.html',          # Redirect after logoff
-    'CHALLENGE_PAGE':            '/auth/logon/challenge.html',# Page for challenges
+    'CHALLENGE_PAGE':            '/auth/logon/challenge.html',# Page for authentication challenges
     'LOGON_LOGO':                '/auth/logon/logo.webp'      # Large image for logon pages
 }
 
