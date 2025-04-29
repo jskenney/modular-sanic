@@ -4,9 +4,11 @@
 
 if [ ! -d venv ]; then
 
+  # Create and source a Python 3.11 virtual environment
   python3.11 -m venv venv
   source ./venv/bin/activate
 
+  # Install required packages
   pip install --upgrade pip
   pip install --upgrade setuptools
   pip install sanic sanic-ext aiomysql python-pam six aiomcache cryptography mysqlclient pymemcache oracledb
@@ -16,11 +18,16 @@ if [ ! -d venv ]; then
 
 else
 
+  # Source the Python 3.11 virtual environment
   source ./venv/bin/activate
 
 fi
 
+# Start Modular Sanic
 sanic server --debug --reload --host=0.0.0.0 -R .
 
-# in Production
+# The config file can be specified from the command line as well
+# SANIC_CONFIG_FILE=config.py sanic server --debug --reload --host=0.0.0.0 -R .
+
+# Example of use in Production
 # sanic server --fast --no-access-logs --reload --host=server.example.com -R ../site/ -R ../auth/ --cert=../ssl/bundle.crt --key=../ssl/bundle.key
