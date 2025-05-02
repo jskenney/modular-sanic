@@ -2,6 +2,7 @@
 # Import Required Python Libraries
 import asyncio, aiomysql, aiomcache
 from sanic import Sanic, response
+from sanic.exceptions import NotFound
 from sanic.response import text, json, html, redirect, empty
 from sanic_session import Session, MemcacheSessionInterface
 import pam, os, importlib.util, time, uuid, sys
@@ -58,8 +59,16 @@ app.static("/html/", app.config.HTML, directory_view=app.config.SHOW_SITE_CONTEN
 app.static("/uikit/", "./uikit/", directory_view=app.config.SHOW_SITE_CONTENTS, name='uikit')
 
 ###############################################################################
+# Support providing a file not found page to the user vice a 404
+if 'PAGE_404' in app.config:
+    print("Notice: Configuring Page 404.")
+    @app.exception(NotFound)
+    async def handle_not_found(request, exception):
+        return html(open(app.config.PAGE_404).read(), status=404)
+
+###############################################################################
 # To support HSTS, a common organizational security requirement.
-if 'HSTS' in app.config:
+if 'HSTS' in app.config and os.path.exists(app.config.HSTS):
     print("Notice: Set HSTS to", app.config.HSTS)
     @app.middleware("response")
     async def add_hsts_headers(request, response):
