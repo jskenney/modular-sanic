@@ -48,15 +48,14 @@ Session(app, interface=MemcacheSessionInterface(client))
 ###############################################################################
 # Determine where the root of the website exists and where
 # the site favicon.ico and /html directory are.
-app.static("/", app.config.INITIAL_PAGE, name="root_html")
+app.static("/", app.config.HTML, index="index.html", directory_view=app.config.SHOW_SITE_CONTENTS)
 app.static("/favicon.ico", app.config.FAVICON, name='favicon')
-app.static("/html/", app.config.HTML, directory_view=app.config.SHOW_SITE_CONTENTS)
 
 ###############################################################################
 # Javascript and CSS for Logon Purposes.
 # UIKit (https://getuikit.com/) is a MIT License based Web Framework
 # jQuery (https://jquery.com/license/) is a MIT License based Javascript Library
-app.static("/uikit/", "./uikit/", directory_view=app.config.SHOW_SITE_CONTENTS, name='uikit')
+app.static("/uikit/", "./uikit/", index="index.html", directory_view=app.config.SHOW_SITE_CONTENTS, name='uikit')
 
 ###############################################################################
 # Support providing a file not found page to the user vice a 404

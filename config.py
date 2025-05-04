@@ -32,15 +32,15 @@ memcached_settings = {
 web_settings = {
     'SHOW_SITE_CONTENTS':         True,                       # Allow directory listings
     # The following values are located relative to server.py's filesystem location
+    # Note the intial page will be 'HTML'/index.html to follow convention
     'HTML':                      './html/',                   # Location of html directory
-    'INITIAL_PAGE':              './html/index.html',         # Initial start page
     'FAVICON':                   './html/favicon.ico',        # Site icon
     'PAGE_404':                  './html/404.html',           # Location of 404 Error (doc not found)
     # The following values are located depending on system configurations and are
     # NOT relative to the location of server.py.
-    'REDIRECT_LOGON_SUCCESSFUL': '/html/index.html',          # Redirect after successful logon
+    'REDIRECT_LOGON_SUCCESSFUL': '/index.html',          # Redirect after successful logon
     'REDIRECT_LOGON_FAILED':     '/auth/logon/apifile.html',  # Redirect after unsuccessful logon
-    'REDIRECT_LOGOFF':           '/html/index.html',          # Redirect after logoff
+    'REDIRECT_LOGOFF':           '/index.html',          # Redirect after logoff
     'CHALLENGE_PAGE':            '/auth/logon/challenge.html',# Page for authentication challenges
     'LOGON_LOGO':                '/auth/logon/logo.webp',     # Large image for logon pages
 }
