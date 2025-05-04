@@ -60,7 +60,7 @@ app.static("/uikit/", "./uikit/", directory_view=app.config.SHOW_SITE_CONTENTS, 
 
 ###############################################################################
 # Support providing a file not found page to the user vice a 404
-if 'PAGE_404' in app.config:
+if 'PAGE_404' in app.config and os.path.exists(app.config.PAGE_404):
     print("Notice: Configuring Page 404.")
     @app.exception(NotFound)
     async def handle_not_found(request, exception):
