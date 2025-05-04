@@ -9,7 +9,8 @@ site_settings = {
                       'api/auth/apikey',     # APIKey and APIFile-Upload Support
                       'api/auth/email'       # Email Challenge Support
                       ],
-    #'HSTS':'86400'                          # Use if you want to set HSTS headers
+    #'HSTS':'86400',                         # Use if you want to set HSTS headers
+    #'DOCUMENTATION': False,                 # Disable OpenAPI Documentation
 }
 
 # MySQL Connection Settings

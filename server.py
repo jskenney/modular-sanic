@@ -67,6 +67,11 @@ if 'PAGE_404' in app.config and os.path.exists(app.config.PAGE_404):
         return html(open(app.config.PAGE_404).read(), status=404)
 
 ###############################################################################
+# Block documentation generation
+if 'DOCUMENTATION' in app.config and app.config.DOCUMENTATION == False:
+    app.config.OAS=False
+
+###############################################################################
 # To support HSTS, a common organizational security requirement.
 if 'HSTS' in app.config and os.path.exists(app.config.HSTS):
     print("Notice: Set HSTS to", app.config.HSTS)
