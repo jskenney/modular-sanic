@@ -246,7 +246,7 @@ class AuthVerification:
                 values = (user,)
                 await cur.execute(query, values)
                 info = await cur.fetchall()
-                if len(info) == 0:
+                if len(info) == 0 or info[0]['apikey'] is None:
                     apikey = await self.genapikey(request, user)
                     await cur.execute(query, values)
                     info = await cur.fetchall()
