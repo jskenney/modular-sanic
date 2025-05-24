@@ -17,7 +17,14 @@ async def system_deauth(request):
     """
     endpoint = '/auth/deauth'
     await request.app.ctx.auth.logoff(request)
-    res = response.json({'success': True, 'sent': time.asctime(time.localtime(time.time())), 'endpoint': endpoint, 'data':{'apikey': None, 'username': None, 'access': {}, 'info': {}, 'redirect': request.app.config.REDIRECT_LOGOFF}})
+    message = ""
+    if not request.ctx.session.get('motd'):
+        message = request.app.config.AUTH_MESSAGE
+        request.ctx.session['motd'] = True
+    page_title = ''
+    if request.app.config.AUTH_TITLE:
+        page_title = request.app.config.AUTH_TITLE
+    res = response.json({'success': True, 'sent': time.asctime(time.localtime(time.time())), 'endpoint': endpoint, 'data':{'apikey': None, 'username': None, 'access': {}, 'info': {}, 'redirect': request.app.config.REDIRECT_LOGOFF, 'logo': request.app.config.LOGON_LOGO, 'message': message, 'page_title': page_title}})
     return res
 
 # Show current apikey, assumes we are logged on
