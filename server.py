@@ -41,9 +41,14 @@ for variable in dir(myconfigs):
         app.config.update(obj)
 
 ###############################################################################
-# Enable Session Support (Default to Memcached interface)
-client = aiomcache.Client(app.config.MEMCACHED_SERVER, app.config.MEMCACHED_PORT)
-Session(app, interface=MemcacheSessionInterface(client))
+# Enable Session Support (Default to Memcached interface), use in-memory model
+# if Memcached is unavailable.  
+# Set MEMCACHEAVAIL = False in the config file to prevent memcached usage.
+if not 'MEMCACHEAVAIL' in app.config or app.config.MEMCACHEAVAIL:
+    client = aiomcache.Client(app.config.MEMCACHED_SERVER, app.config.MEMCACHED_PORT)
+    Session(app, interface=MemcacheSessionInterface(client))
+else:
+    Session(app)
 
 ###############################################################################
 # Determine where the root of the website exists and where
@@ -100,37 +105,49 @@ for source in (app.config.API_LOCATIONS):
 
 ###############################################################################
 # Configure and connect to memcached (Variable Caching, schedules, etc.)
+# Optional, but functionality will be limited.
+# Set MEMCACHEAVAIL = False in the config file to prevent memcached usage.
 @app.listener('before_server_start')
 async def setup_memcache(app, loop):
-    app.ctx.mc = aiomcache.Client(app.config.MEMCACHED_SERVER, app.config.MEMCACHED_PORT)
-    print("Notice: Memcached connection pool created.")
+    if not 'MEMCACHEAVAIL' in app.config or app.config.MEMCACHEAVAIL:
+        app.ctx.mc = aiomcache.Client(app.config.MEMCACHED_SERVER, app.config.MEMCACHED_PORT)
+        print("Notice: Memcached connection pool created.")
 
 @app.listener('after_server_stop')
 async def close_memcache(app, loop):
-    await app.ctx.mc.close()
-    print("Notice: Memcached connection pool closed.")
+    if not 'MEMCACHEAVAIL' in app.config or app.config.MEMCACHEAVAIL:
+        await app.ctx.mc.close()
+        print("Notice: Memcached connection pool closed.")
 
 ###############################################################################
-# Configure and connect to the MySQL database.
+# Configure and connect to the MySQL database, this is optional but not having
+# MySQL available will limit functionality, including authentication options.
+# Set MYSQLAVAIL = False in the config file to prevent MySQL from Loading.
 @app.listener('before_server_start')
 async def setup_db(app, loop):
-    app.ctx.pool = await aiomysql.create_pool(
-        host=app.config.DB_HOST,
-        port=app.config.DB_PORT,
-        user=app.config.DB_USER,
-        password=app.config.DB_PASS,
-        db=app.config.DB_NAME,
-        loop=loop,
-        autocommit=True
-    )
-    app.ctx.loop = loop
-    print("Notice: Database connection pool created.")
+    if not 'MYSQLAVAIL' in app.config or app.config.MYSQLAVAIL:
+        try:
+            app.ctx.pool = await aiomysql.create_pool(
+                host=app.config.DB_HOST,
+                port=app.config.DB_PORT,
+                user=app.config.DB_USER,
+                password=app.config.DB_PASS,
+                db=app.config.DB_NAME,
+                loop=loop,
+                autocommit=True
+            )
+            app.ctx.loop = loop
+            app.config.MYSQLAVAIL = True
+            print("Notice: Database connection pool created.")
+        except:
+            app.config.MYSQLAVAIL = False
 
 @app.listener('after_server_stop')
 async def close_db(app, loop):
-    app.ctx.pool.close()
-    await app.ctx.pool.wait_closed()
-    print("Notice: Database connection pool closed.")
+    if app.config.MYSQLAVAIL:
+        app.ctx.pool.close()
+        await app.ctx.pool.wait_closed()
+        print("Notice: Database connection pool closed.")
 
 ###############################################################################
 # Configure global Authentication & Verification methods, this depends
@@ -138,6 +155,7 @@ async def close_db(app, loop):
 # access information from the MySQL database's
 # sanic_info, sanic_access, and sanic_challenge tables.
 class AuthVerification:
+    # Verify User's Status by _ONLY_ checking session information
     async def verify(self, request):
         if not request.ctx.session.get('user') or not request.ctx.session.get('visit') or time.time() - request.ctx.session.get('visit') > request.app.config.AUTH_VALID:
             await self.logoff(request)
@@ -148,6 +166,7 @@ class AuthVerification:
         username = request.ctx.session.get('user')
         request.ctx.session['visit'] = time.time()
         return True, username, apikey, access, info
+    # Verify User's Status by Checkinging Session then MySQL Database
     async def verifyapi(self, request, mykey):
         if not request.ctx.session.get('user') or not request.ctx.session.get('visit') or time.time() - request.ctx.session.get('visit') > request.app.config.AUTH_VALID:
             async with request.app.ctx.pool.acquire() as conn:
@@ -167,6 +186,7 @@ class AuthVerification:
             username = request.ctx.session.get('user')
             request.ctx.session['visit'] = time.time()
             return True, username, apikey, access, info
+    # Remove Session Variables effectively logging off the user
     async def logoff(self, request):
         if request.ctx.session.get('apikey'):
             del(request.ctx.session['apikey'])
@@ -182,6 +202,7 @@ class AuthVerification:
             del(request.ctx.session['visit'])
         if request.ctx.session.get('original_user'):
             del(request.ctx.session['original_user'])
+    # Generate an API key, requires MySQL
     async def genapikey(self, request, user):
         async with request.app.ctx.pool.acquire() as conn:
             async with conn.cursor(aiomysql.DictCursor) as cur:
@@ -195,6 +216,7 @@ class AuthVerification:
                 info = await cur.fetchall()
                 apikey = info[0]['apikey']
                 return apikey
+    # Update Access Information, requires MySQL
     async def access_add(self, request, user, access, value):
         async with request.app.ctx.pool.acquire() as conn:
             async with conn.cursor(aiomysql.DictCursor) as cur:
@@ -204,6 +226,7 @@ class AuthVerification:
                     await cur.execute(query, values)
                 except:
                     pass
+    # Delete Access Information, requires MySQL
     async def access_del(self, request, user, access, value):
         async with request.app.ctx.pool.acquire() as conn:
             async with conn.cursor(aiomysql.DictCursor) as cur:
@@ -213,7 +236,11 @@ class AuthVerification:
                     await cur.execute(query, values)
                 except:
                     pass
+    # Show current user's access (either via session or MySQL)
     async def access_show(self, request, user):
+        if not app.config.MYSQLAVAIL:
+            username, apikey, access, info = self.verify(request)
+            return user, apikey, info, access
         info = {}
         access = {}
         apikey = ''
@@ -236,7 +263,16 @@ class AuthVerification:
                         access[row['access']] = []
                     access[row['access']].append(row['value'])
                 return user, apikey, info, access
-    async def logon(self, request, user):
+    # Log on a user, if MySQL is available use the database to provide access levels
+    # Otherwise they can be set from the function.
+    async def logon(self, request, user, apikey='', access={}, info=''):
+        if not app.config.MYSQLAVAIL:
+            request.ctx.session['apikey'] = apikey
+            request.ctx.session['access'] = access
+            request.ctx.session['info'] = info
+            request.ctx.session['user'] = user
+            request.ctx.session['visit'] = time.time()
+            return user, apikey, info, access
         info = {}
         access = {}
         apikey = ''
