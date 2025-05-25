@@ -14,6 +14,8 @@ site_settings = {
 }
 
 # MySQL Connection Settings
+# Note: Either incorrect settings below, or using MYSQLAVAIL: False
+#       will block MySQL from operating
 db_settings = {
     'DB_HOST': '127.0.0.1',                  # MySQL Database Host
     'DB_USER': 'username',                   # MySQL Database User
@@ -23,6 +25,8 @@ db_settings = {
 }
 
 # Memcached Connection Settings
+# Note: Either incorrect settings below, or using MEMCACHEAVAIL: False
+#       will block memcached from operating.
 memcached_settings = {
     'MEMCACHED_SERVER': '127.0.0.1',         # Memcached Server
     'MEMCACHED_PORT':    11211               # Memcached Port

@@ -45,9 +45,12 @@ for variable in dir(myconfigs):
 # if Memcached is unavailable.  
 # Set MEMCACHEAVAIL = False in the config file to prevent memcached usage.
 if not 'MEMCACHEAVAIL' in app.config or app.config.MEMCACHEAVAIL:
-    client = aiomcache.Client(app.config.MEMCACHED_SERVER, app.config.MEMCACHED_PORT)
-    Session(app, interface=MemcacheSessionInterface(client))
-else:
+    try:
+        client = aiomcache.Client(app.config.MEMCACHED_SERVER, app.config.MEMCACHED_PORT)
+        Session(app, interface=MemcacheSessionInterface(client))
+    except:
+        app.config.MEMCACHEAVAIL = False
+if 'MEMCACHEAVAIL' in app.config and app.config.MEMCACHEAVAIL == False:
     Session(app)
 
 ###############################################################################
