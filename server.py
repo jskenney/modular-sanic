@@ -42,7 +42,7 @@ for variable in dir(myconfigs):
 
 ###############################################################################
 # Enable Session Support (Default to Memcached interface), use in-memory model
-# if Memcached is unavailable.  
+# if Memcached is unavailable.
 # Set MEMCACHEAVAIL = False in the config file to prevent memcached usage.
 if not 'MEMCACHEAVAIL' in app.config or app.config.MEMCACHEAVAIL:
     try:
@@ -58,12 +58,6 @@ if 'MEMCACHEAVAIL' in app.config and app.config.MEMCACHEAVAIL == False:
 # the site favicon.ico and /html directory are.
 app.static("/", app.config.HTML, index="index.html", directory_view=app.config.SHOW_SITE_CONTENTS)
 app.static("/favicon.ico", app.config.FAVICON, name='favicon')
-
-###############################################################################
-# Javascript and CSS for Logon Purposes.
-# UIKit (https://getuikit.com/) is a MIT License based Web Framework
-# jQuery (https://jquery.com/license/) is a MIT License based Javascript Library
-app.static("/uikit/", "./uikit/", index="index.html", directory_view=app.config.SHOW_SITE_CONTENTS, name='uikit')
 
 ###############################################################################
 # Support providing a file not found page to the user vice a 404
