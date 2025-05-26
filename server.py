@@ -201,6 +201,8 @@ class AuthVerification:
             del(request.ctx.session['original_user'])
     # Generate an API key, requires MySQL
     async def genapikey(self, request, user):
+        if not app.config.MYSQLAVAIL:
+            return None
         async with request.app.ctx.pool.acquire() as conn:
             async with conn.cursor(aiomysql.DictCursor) as cur:
                 query = 'INSERT INTO sanic_info (user, apikey) VALUES (%s, %s) ON DUPLICATE KEY UPDATE apikey=%s'
@@ -215,6 +217,8 @@ class AuthVerification:
                 return apikey
     # Update Access Information, requires MySQL
     async def access_add(self, request, user, access, value):
+        if not app.config.MYSQLAVAIL:
+            return None
         async with request.app.ctx.pool.acquire() as conn:
             async with conn.cursor(aiomysql.DictCursor) as cur:
                 query = 'INSERT INTO sanic_access (user, access, value) VALUES (%s, %s, %s)'
@@ -225,6 +229,8 @@ class AuthVerification:
                     pass
     # Delete Access Information, requires MySQL
     async def access_del(self, request, user, access, value):
+        if not app.config.MYSQLAVAIL:
+            return None
         async with request.app.ctx.pool.acquire() as conn:
             async with conn.cursor(aiomysql.DictCursor) as cur:
                 query = 'DELETE FROM sanic_access WHERE user = %s AND access = %s AND value =%s'
