@@ -5,6 +5,8 @@ site_settings = {
     'NAME':           "SanicApp_Version_1",  # Title of Application
     'API_LOCATIONS': [
                       'api/auth/general',    # General Authentication (Required)
+                      'api/auth/logon',      # Provide Default Logon Pages
+                      'api/auth/switchuser', # Allow Admin Users to Become other Users
                       'api/auth/pam',        # PAM (Local Logon) Support
                       'api/auth/apikey',     # APIKey and APIFile-Upload Support
                       'api/auth/email'       # Email Challenge Support
