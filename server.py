@@ -268,8 +268,8 @@ class AuthVerification:
                 return user, apikey, info, access
     # Log on a user, if MySQL is available use the database to provide access levels
     # Otherwise they can be set from the function.
-    async def logon(self, request, user, apikey='', access={}, info=''):
-        if not app.config.MYSQLAVAIL:
+    async def logon(self, request, user, access={}, info='', apikey='', forceNoMySQL=False):
+        if not app.config.MYSQLAVAIL or forceNoMySQL:
             request.ctx.session['apikey'] = apikey
             request.ctx.session['access'] = access
             request.ctx.session['info'] = info
