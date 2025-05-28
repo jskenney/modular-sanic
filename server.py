@@ -1,10 +1,10 @@
 ###############################################################################
 # Import Required Python Libraries
-import asyncio, aiomysql, aiomcache
+import asyncio, aiomysql, aiomcache, pymemcache
 from sanic import Sanic, response
 from sanic.exceptions import NotFound
 from sanic.response import text, json, html, redirect, empty
-from sanic_session import Session, MemcacheSessionInterface
+from sanic_session import Session, MemcacheSessionInterface, InMemorySessionInterface
 import pam, os, importlib.util, time, uuid, sys
 
 ###############################################################################
@@ -46,12 +46,19 @@ for variable in dir(myconfigs):
 # Set MEMCACHEAVAIL = False in the config file to prevent memcached usage.
 if not 'MEMCACHEAVAIL' in app.config or app.config.MEMCACHEAVAIL:
     try:
-        client = aiomcache.Client(app.config.MEMCACHED_SERVER, app.config.MEMCACHED_PORT)
-        Session(app, interface=MemcacheSessionInterface(client))
+        test_client = pymemcache.client.base.Client((app.config.MEMCACHED_SERVER, app.config.MEMCACHED_PORT))
+        test = test_client.get('user')
+        test_client.close()
     except:
         app.config.MEMCACHEAVAIL = False
-if 'MEMCACHEAVAIL' in app.config and app.config.MEMCACHEAVAIL == False:
+
+if not 'MEMCACHEAVAIL' in app.config or app.config.MEMCACHEAVAIL:
+    client = aiomcache.Client(app.config.MEMCACHED_SERVER, app.config.MEMCACHED_PORT)
+    Session(app, interface=MemcacheSessionInterface(client))
+    print("Notice: Using Memcached Session Handling")
+else:
     Session(app)
+    print("Notice: Using InMemory Session Handling")
 
 ###############################################################################
 # Determine where the root of the website exists and where
