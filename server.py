@@ -77,6 +77,7 @@ if 'PAGE_404' in app.config and os.path.exists(app.config.PAGE_404):
 ###############################################################################
 # Block documentation generation
 if 'DOCUMENTATION' in app.config and app.config.DOCUMENTATION == False:
+    print("Notice: Documentation is unavailable.")
     app.config.OAS=False
 
 ###############################################################################
@@ -145,6 +146,7 @@ async def setup_db(app, loop):
             print("Notice: Database connection pool created.")
         except:
             app.config.MYSQLAVAIL = False
+            print("Notice: Database connection failed.")
 
 @app.listener('after_server_stop')
 async def close_db(app, loop):
