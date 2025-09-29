@@ -2,42 +2,43 @@
 <html lang="en">
 <head>
 
- <meta charset="utf-8">
- <meta name="viewport"  content="width=device-width, initial-scale=1">
+  <meta charset="utf-8">
+  <meta name="viewport"  content="width=device-width, initial-scale=1">
 
- <link rel="icon"       href="/favicon.ico">
- <link rel="stylesheet" href="/auth/logon/uikit/uikit.min.css">
+  <link rel="icon"       href="/favicon.ico">
+  <link rel="stylesheet" href="/auth/logon/uikit/uikit.min.css">
 
- <script src="/auth/logon/uikit/uikit.min.js"></script>
- <script src="/auth/logon/uikit/uikit-icons.min.js"></script>
- <script src="/auth/logon/uikit/jquery.js"></script>
+  <script src="/auth/logon/uikit/uikit.min.js"></script>
+  <script src="/auth/logon/uikit/uikit-icons.min.js"></script>
+  <script src="/auth/logon/uikit/jquery.js"></script>
 
- <title>Start Page</title>
+  <title>Start Page</title>
 
 </head>
 <body class="uk-flex uk-flex-center uk-flex-middle uk-background-muted " data-uk-height-viewport>
-<pre><h4>Documentation</h4>
-<a href="/docs/swagger">/docs/swagger</a>              - Documentation (Swagger)
-<a href="/docs">/docs</a>                      - Documentation (ReDocs)
-<h4>Authentication</h4>
-<a href="/auth/logon/logon.html">/auth/logon/logon.html</a>     - Website for PAM Authentication                 (will redirect if logged on)
-<a href="/auth/logon/challenge.html">/auth/logon/challenge.html</a> - Website for Email Challenge Authentication     (will redirect if logged on)
-<a href="/auth/logon/apikey.html">/auth/logon/apikey.html</a>    - Website for API Key Authentication             (will redirect if logged on)
-<a href="/auth/logon/apifile.html">/auth/logon/apifile.html</a>   - Website for API Key File Upload Authentication (will redirect if logged on)
+<br><br>
+<pre><h3>API Documentation</h3><a href="/docs/swagger">/docs/swagger</a>              - Automatically Generated API Documentation (Swagger)
+<a href="/docs">/docs</a>                      - Automatically Generated API Documentation (ReDocs)<h4>Authentication Endpoints (accessible from within a session capable browser)</h4><a href="/auth/logon/logon.html">/auth/logon/logon.html</a>     - PAM Authentication                 (will redirect if logged on)
+<a href="/auth/logon/challenge.html">/auth/logon/challenge.html</a> - Email Challenge Authentication     (will redirect if logged on)
+<a href="/auth/logon/apikey.html">/auth/logon/apikey.html</a>    - API Key Authentication             (will redirect if logged on)
+<a href="/auth/logon/apifile.html">/auth/logon/apifile.html</a>   - API Key File Upload Authentication (will redirect if logged on)
+<a href="/auth/logon/usna.html">/auth/logon/usna.html</a>      - USNA SSO Authentication            (will redirect if logged on)
 
-<a href="/auth/logon/su.html">/auth/logon/su.html</a>        - Website for Admin SU (Switch User)
-<a href="/auth/logon/return.html">/auth/logon/return.html</a>    - Website for Admin SU Return
-<a href="/auth/logon/logoff.html">/auth/logon/logoff.html</a>    - Website for Logoff
+<a href="/auth/logon/logoff.html">/auth/logon/logoff.html</a>    - Logoff
+
+<a href="/auth/logon/su.html">/auth/logon/su.html</a>        - Switch User - Requires Admin
+<a href="/auth/logon/return.html">/auth/logon/return.html</a>    - Switch User - Return to original account
 
 <a href="/auth/key">/auth/key</a>                  - Show User Info
 <a href="/auth/info">/auth/info</a>                 - Show User and Site Info (used on auth websites)
 <a href="/auth/rekey">/auth/rekey</a>                - Reset API Key
-
-/auth/access/list/&lt;user&gt;                    - Lists Accesses (requires admin for other users)
-/auth/access/add/&lt;user&gt;/&lt;access&gt;/&lt;value&gt;    - Add/Modify Access (requires admin)
-/auth/access/remove/&lt;user&gt;/&lt;access&gt;/&lt;value&gt; - Remove Access (requires admin)
-<h4>API Key</h4><p id=akey>Pending jquery response...</p><h4>Logged on User Information</h4><p id=info>Pending jquery response...</p>
-
+<h4>API Key (Provided for debugging and inserted automatically into most examples below)</h4>
+<span id=akey>Pending jquery response...</span>
+<h4>Logged on User Information (Provided for debugging)</h4>
+<span id=info>Pending jquery response...</span>
+<h3>Endpoints below require an API key, key is ignored if a valid web session is found.</h3><h4>Access Endpoints</h4>/&lt;apikey&gt;/auth/access/list/&lt;user&gt;                    - Lists Accesses (requires admin for other users)
+/&lt;apikey&gt;/auth/access/add/&lt;user&gt;/&lt;access&gt;/&lt;value&gt;    - Add/Modify Access (requires admin)
+/&lt;apikey&gt;/auth/access/remove/&lt;user&gt;/&lt;access&gt;/&lt;value&gt; - Remove Access (requires admin)
 </pre>
 <br><br><br>
 <script>
