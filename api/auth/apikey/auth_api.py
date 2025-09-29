@@ -8,7 +8,7 @@ sub_bp = Blueprint("auth_api_options", url_prefix="/auth")
 @sub_bp.route("/apikey", methods=['POST'])
 async def system_apikey(request):
     """
-    Authenticate a user using their apikey.
+    Authenticate a user using their API key.
     """
     endpoint = '/auth/apikey/'
     data = request.json
@@ -33,6 +33,9 @@ async def system_apikey(request):
 
 @sub_bp.route("/apifile", methods=['POST'])
 async def system_apifile(request):
+    """
+    Authenticate a user by uploading a file with their API key.
+    """
     endpoint = '/auth/apifile'
     if not request.files:
         return response.json({'success': False, 'sent': time.asctime(time.localtime(time.time())), 'endpoint': endpoint, "error": "No files uploaded", 'data':{}})
@@ -80,4 +83,3 @@ async def system_apifile(request):
     user, apikey, info, access = await request.app.ctx.auth.logon(request, info[0]['user'])
     res = response.json({'success': True, 'sent': time.asctime(time.localtime(time.time())), 'endpoint': endpoint, 'data':{'username': user, 'apikey': apikey, 'access': access, 'info': info, 'redirect': request.app.config.REDIRECT_LOGON_SUCCESSFUL}})
     return res
-

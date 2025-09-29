@@ -8,7 +8,7 @@ sub_bp = Blueprint("auth_challenge_option", url_prefix="/auth")
 @sub_bp.route("/challenge", methods=['POST'])
 async def system_challenge(request):
     """
-    Verify a authentication challenge request.  Challenge response code will need to be added by a script outside of the default library.
+    Verify a authentication challenge request.
     """
     endpoint = '/auth/challenge/'
     data = request.json
@@ -33,4 +33,3 @@ async def system_challenge(request):
             user, apikey, info, access = await request.app.ctx.auth.logon(request, user)
             res = response.json({'success': True, 'sent': time.asctime(time.localtime(time.time())), 'endpoint': endpoint, 'data':{'username': user, 'apikey': apikey, 'access': access, 'info': info, 'redirect': request.app.config.REDIRECT_LOGON_SUCCESSFUL}})
             return res
-

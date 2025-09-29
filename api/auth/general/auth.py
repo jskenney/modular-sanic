@@ -10,7 +10,7 @@ sub_bp = Blueprint("auth", url_prefix="/auth")
 @sub_bp.route("/deauth", methods=['GET'])
 async def system_deauth(request):
     """
-    Log out of the system
+    Log off and invalidate current session.
     """
     endpoint = '/auth/deauth'
     await request.app.ctx.auth.logoff(request)
@@ -28,7 +28,7 @@ async def system_deauth(request):
 @sub_bp.route("/key", methods=['GET'])
 async def system_key(request):
     """
-    Show current apikey and user information
+    Show current API key and user data.
     """
     endpoint = '/auth/key'
     ok, username, apikey, access, info = await request.app.ctx.auth.verify(request)
@@ -39,7 +39,7 @@ async def system_key(request):
 @sub_bp.route("/info", methods=['GET'])
 async def system_info(request):
     """
-    Show current apikey and user information
+    Show current API key and user data, along with site information.
     """
     endpoint = '/auth/info'
     ok, username, apikey, access, info = await request.app.ctx.auth.verify(request)
@@ -57,25 +57,50 @@ async def system_info(request):
     return res
 
 # Refresh Accesses
-@sub_bp.route("/refresh", methods=['POST'])
+@sub_bp.route("/refresh", methods=['GET'])
 async def system_refresh(request):
     """
-    Refresh your access and info
+    Refresh current logged on users access and info, reloads from database, returns same information as /auth/info.
     """
     endpoint = '/auth/refresh'
+    message = ""
+    if not request.ctx.session.get('motd'):
+        message = request.app.config.AUTH_MESSAGE
+        request.ctx.session['motd'] = True
+    page_title = ''
+    if request.app.config.AUTH_TITLE:
+        page_title = request.app.config.AUTH_TITLE
     ok, username, apikey, access, info = await request.app.ctx.auth.verify(request)
     if ok:
-        user, apikey, info, access = await request.app.ctx.auth.logon(request, data['username'])
-        res = response.json({'success': True, 'sent': time.asctime(time.localtime(time.time())), 'endpoint':endpoint, 'data':{'username': user, 'apikey': apikey, 'access': access, 'info': info, 'redirect': request.app.config.REDIRECT_LOGON_SUCCESSFUL}})
+        user, apikey, info, access = await request.app.ctx.auth.logon(request, username)
+        redirect = request.app.config.REDIRECT_LOGON_SUCCESSFUL
+        res = response.json({'success': ok, 'sent': time.asctime(time.localtime(time.time())), 'endpoint': endpoint, 'data':{'apikey': apikey, 'username': username, 'access': access, 'info': info, 'redirect': redirect, 'logo': request.app.config.LOGON_LOGO, 'message': message, 'page_title': page_title}})
     else:
-        res = response.json({'success': False, 'sent': time.asctime(time.localtime(time.time())), 'endpoint':endpoint, 'data':{'username': username, 'apikey': apikey, 'access': access, 'info': info, 'redirect': request.app.config.REDIRECT_LOGON_FAILED}})
+        redirect = request.app.config.REDIRECT_LOGON_FAILED
+        res = response.json({'success': ok, 'sent': time.asctime(time.localtime(time.time())), 'endpoint': endpoint, 'data':{'apikey': apikey, 'username': username, 'access': access, 'info': info, 'redirect': redirect, 'logo': request.app.config.LOGON_LOGO, 'message': message, 'page_title': page_title}})
+    return res
+
+# Show current apikey, assumes we are logged on
+@sub_bp.route("/rekey", methods=['GET'])
+async def system_rekey(request):
+    """
+    Generate new API Key and provide updated API key and user information
+    """
+    endpoint = '/auth/rekey'
+    ok, username, apikey, access, info = await request.app.ctx.auth.verify(request)
+    redirect = request.app.config.REDIRECT_LOGON_FAILED
+    if ok:
+        apikey = await request.app.ctx.auth.genapikey(request, username)
+        user, apikey, info, access = await request.app.ctx.auth.logon(request, username)
+        redirect = request.app.config.REDIRECT_LOGON_SUCCESSFUL
+    res = response.json({'success': ok, 'sent': time.asctime(time.localtime(time.time())), 'endpoint': endpoint, 'data':{'apikey': apikey, 'username': username, 'access': access, 'info': info, 'redirect': redirect, 'logo': request.app.config.LOGON_LOGO}})
     return res
 
 # Switch Users (assuming admin access)
 @sub_bp.route("/access/list/<user>", methods=['GET'])
 async def system_access_list(request, user):
     """
-    Provies the access key/value pairs for a specific user.  Must be that user or have admin/permissions access.
+    Provides the access key/value pairs for a specific user.  Must be either current user or have admin/permissions access.
     """
     endpoint = '/auth/access/list'
     ok, username, apikey, access, info = await request.app.ctx.auth.verify(request)
@@ -120,20 +145,4 @@ async def system_access_remove(request, user, access, value):
         res = response.json({'success': True, 'sent': time.asctime(time.localtime(time.time())), 'endpoint':endpoint, 'data':{'username': user, 'access': access}})
     else:
         res = response.json({'success': False, 'sent': time.asctime(time.localtime(time.time())), 'endpoint':endpoint, 'data':{'username': username, 'access': {}}})
-    return res
-
-# Show current apikey, assumes we are logged on
-@sub_bp.route("/rekey", methods=['GET'])
-async def system_rekey(request):
-    """
-    Replace API Key and then show current apikey and user information
-    """
-    endpoint = '/auth/rekey'
-    ok, username, apikey, access, info = await request.app.ctx.auth.verify(request)
-    redirect = request.app.config.REDIRECT_LOGON_FAILED
-    if ok:
-        apikey = await request.app.ctx.auth.genapikey(request, username)
-        user, apikey, info, access = await request.app.ctx.auth.logon(request, username)
-        redirect = request.app.config.REDIRECT_LOGON_SUCCESSFUL
-    res = response.json({'success': ok, 'sent': time.asctime(time.localtime(time.time())), 'endpoint': endpoint, 'data':{'apikey': apikey, 'username': username, 'access': access, 'info': info, 'redirect': redirect, 'logo': request.app.config.LOGON_LOGO}})
     return res

@@ -9,7 +9,7 @@ sub_bp = Blueprint("auth_pam_option", url_prefix="/auth")
 @sub_bp.route("/pam", methods=['POST'])
 async def system_pamauth(request):
     """
-    Perform basic PAM authentication (system level)
+    Perform basic PAM authentication (requires username and password).
     """
     endpoint = '/auth/pam'
     data = request.form
@@ -23,4 +23,3 @@ async def system_pamauth(request):
     else:
         res = response.json({'success': False, 'sent': time.asctime(time.localtime(time.time())), 'endpoint':endpoint, 'data':{'username': None, 'apikey': apikey, 'access': {}, 'info': {}, 'redirect': request.app.config.REDIRECT_LOGON_FAILED}})
     return res
-

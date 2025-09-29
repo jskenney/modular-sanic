@@ -9,6 +9,9 @@ sub_bp = Blueprint("auth_challenge_response", url_prefix="/auth/request/challeng
 
 @sub_bp.route("/", methods=['POST'])
 async def system_request_challenge(request):
+    """
+    Send an email with a 7 digit challenge.
+    """
     endpoint = '/auth/request/challenge'
     data = request.json
     username = data['username']
