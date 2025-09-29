@@ -3,11 +3,11 @@ from sanic_ext import openapi
 import asyncio, aiomysql
 import time, re
 
-sub_bp = Blueprint("auth", url_prefix="/auth")
+sub_bp = Blueprint("auth", url_prefix="/")
 
 ###############################################################################
 # Deauthenticate / Logoff (remove cookie and any database references)
-@sub_bp.route("/deauth", methods=['GET'])
+@sub_bp.route("/auth/deauth", methods=['GET'])
 async def system_deauth(request):
     """
     Log off and invalidate current session.
@@ -25,7 +25,7 @@ async def system_deauth(request):
     return res
 
 # Show current apikey, assumes we are logged on
-@sub_bp.route("/key", methods=['GET'])
+@sub_bp.route("/auth/key", methods=['GET'])
 async def system_key(request):
     """
     Show current API key and user data.
@@ -36,7 +36,7 @@ async def system_key(request):
     return res
 
 # Show current apikey, assumes we are logged on
-@sub_bp.route("/info", methods=['GET'])
+@sub_bp.route("/auth/info", methods=['GET'])
 async def system_info(request):
     """
     Show current API key and user data, along with site information.
@@ -57,7 +57,7 @@ async def system_info(request):
     return res
 
 # Refresh Accesses
-@sub_bp.route("/refresh", methods=['GET'])
+@sub_bp.route("/auth/refresh", methods=['GET'])
 async def system_refresh(request):
     """
     Refresh current logged on users access and info, reloads from database, returns same information as /auth/info.
@@ -81,7 +81,7 @@ async def system_refresh(request):
     return res
 
 # Show current apikey, assumes we are logged on
-@sub_bp.route("/rekey", methods=['GET'])
+@sub_bp.route("/auth/rekey", methods=['GET'])
 async def system_rekey(request):
     """
     Generate new API Key and provide updated API key and user information
@@ -97,13 +97,13 @@ async def system_rekey(request):
     return res
 
 # Switch Users (assuming admin access)
-@sub_bp.route("/access/list/<user>", methods=['GET'])
-async def system_access_list(request, user):
+@sub_bp.route("/<apikey>/auth/access/list/<user>", methods=['GET'])
+async def system_access_list(request, apikey, user):
     """
     Provides the access key/value pairs for a specific user.  Must be either current user or have admin/permissions access.
     """
-    endpoint = '/auth/access/list'
-    ok, username, apikey, access, info = await request.app.ctx.auth.verify(request)
+    endpoint = '/<apikey>/auth/access/list/'+user
+    ok, username, apikey, access, info = await request.app.ctx.auth.verifyapi(request, apikey)
     if username == user or ('admin' in access and 'permissions' in access['admin']):
         user, apikey, info, access = await request.app.ctx.auth.access_show(request, user)
         res = response.json({'success': True, 'sent': time.asctime(time.localtime(time.time())), 'endpoint':endpoint, 'data':{'username': user, 'access': access}})
@@ -112,15 +112,15 @@ async def system_access_list(request, user):
     return res
 
 # Switch Users (assuming admin access)
-@sub_bp.route("/access/add/<user>/<access>/<value>", methods=['GET'])
-async def system_access_add(request, user, access, value):
+@sub_bp.route("/<apikey>/auth/access/add/<user>/<access>/<value>", methods=['GET'])
+async def system_access_add(request, apikey, user, access, value):
     """
     Add specific access key/value pairs for a user, must be a user with admin/permissions access.
     """
-    endpoint = '/auth/access/add'
+    endpoint = '/<apikey>/auth/access/add/'+user+'/'+access+'/'+value
     naccess = access
     nvalue = value
-    ok, username, apikey, access, info = await request.app.ctx.auth.verify(request)
+    ok, username, apikey, access, info = await request.app.ctx.auth.verifyapi(request, apikey)
     if 'admin' in access and 'permissions' in access['admin']:
         await request.app.ctx.auth.access_add(request, user, naccess, nvalue)
         user, apikey, info, access = await request.app.ctx.auth.access_show(request, user)
@@ -130,15 +130,15 @@ async def system_access_add(request, user, access, value):
     return res
 
 # Switch Users (assuming admin access)
-@sub_bp.route("/access/remove/<user>/<access>/<value>", methods=['GET'])
-async def system_access_remove(request, user, access, value):
+@sub_bp.route("/<apikey>/auth/access/remove/<user>/<access>/<value>", methods=['GET'])
+async def system_access_remove(request, apikey, user, access, value):
     """
     Remove a specific access key/value pair for a user, must be a user with admin/permissions access.
     """
-    endpoint = '/auth/access/remove'
+    endpoint = '/<apikey>/auth/access/remove/'+user+'/'+access+'/'+value
     naccess = access
     nvalue = value
-    ok, username, apikey, access, info = await request.app.ctx.auth.verify(request)
+    ok, username, apikey, access, info = await request.app.ctx.auth.verifyapi(request, apikey)
     if 'admin' in access and 'permissions' in access['admin']:
         await request.app.ctx.auth.access_del(request, user, naccess, nvalue)
         user, apikey, info, access = await request.app.ctx.auth.access_show(request, user)
