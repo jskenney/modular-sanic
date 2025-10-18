@@ -4,7 +4,7 @@ Using Sanic (https://sanic.dev, https://github.com/sanic-org/sanic) as the core,
 
 # Initial Setup
 
-The assumption is that this will be run on Ubuntu 24.04 using Python3.11 (due to sanic-session cookie issues), review the setup.sh script in the setup directory to get to a state where the default repo configuration will run.
+The assumption is that this will be run on Ubuntu using Python3.11 (this version of python due to sanic-session cookie issues), review the setup.sh script in the setup directory to see expected Ubuntu packages and the start.sh script to see how the local python environment is setup.  These steps will get you to get to a state where the default repo configuration will run.
 
 # Basic Usage
 
@@ -29,4 +29,4 @@ Specifically, it will search for all .py files, that have a Blueprint line (call
 sub_bp = Blueprint("auth_api_options", url_prefix="/auth")
 ```
 
-If that line is present, Modular Sanic will attempt to load the API endpoints from this file.
+If that line is present, Modular Sanic will attempt to load the API endpoints from this file and you can add new endpoints on the fly by simply added them to locations that are being scanned by the sanic software.
