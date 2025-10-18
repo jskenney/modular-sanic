@@ -10,7 +10,6 @@
 
  <script src="/uikit/uikit.min.js"></script>
  <script src="/uikit/uikit-icons.min.js"></script>
- <script src="/uikit/jquery.js"></script>
 
  <title>Site Logon</title>
 
@@ -66,31 +65,52 @@
  </div>
  <script type='text/javascript'>
 
-  $.ajax({
-    url: '/auth/info',
-    method: 'GET',
-    success: function(result) {
-      if (result['success']) {
-        document.location = result['data']['redirect'];
-      }
-      if (result['data']['logo'] != '/auth/logon/logo.webp') {
-        $('#logo').attr("src", result['data']['logo']);
-      }
-      if (result['data']['page_title'] && result['data']['page_title'] != '') {
-        document.title = result['data']['page_title'];
-      }
-      if (result['data']['message'] && result['data']['message'] != '') {
-        $('#sanic-modal-contents').html(result['data']['message']);
-        UIkit.modal("#sanic-modal").toggle();
-        $('#ack').focus();
-      }
-    }
-  });
+ fetch('/auth/info')
+   .then(response => {
+     if (!response.ok) {
+       throw new Error(`HTTP error! Status: ${response.status}`);
+     }
+     return response.json();
+   })
+   .then(result => {
+     if (result.success) {
+       document.location = result.data.redirect;
+     }
 
-  $('#sanic-modal').on({
-    'hide.uk.modal': function(){
-       $('#inputUsername').focus();
-    }
+     if (result.data.logo !== '/auth/logon/logo.webp') {
+       const logo = document.getElementById('logo');
+       if (logo) {
+         logo.setAttribute('src', result.data.logo);
+       }
+     }
+
+     if (result.data.page_title && result.data.page_title !== '') {
+       document.title = result.data.page_title;
+     }
+
+     if (result.data.message && result.data.message !== '') {
+       const modalContent = document.getElementById('sanic-modal-contents');
+       if (modalContent) {
+         modalContent.innerHTML = result.data.message;
+       }
+
+       // Toggle UIkit modal
+       if (typeof UIkit !== 'undefined' && UIkit.modal) {
+         UIkit.modal("#sanic-modal").toggle();
+       }
+
+       const ackButton = document.getElementById('ack');
+       if (ackButton) {
+         ackButton.focus();
+       }
+     }
+   })
+   .catch(error => {
+     console.error('Error fetching auth info:', error);
+   });
+
+  document.getElementById('sanic-modal').addEventListener('hide.uk.modal', function () {
+    document.getElementById('inputUsername').focus();
   });
 
   var bar = document.getElementById('js-progressbar');

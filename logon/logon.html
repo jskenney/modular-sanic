@@ -10,7 +10,6 @@
 
  <script src="/uikit/uikit.min.js"></script>
  <script src="/uikit/uikit-icons.min.js"></script>
- <script src="/uikit/jquery.js"></script>
 
  <title>Site Logon</title>
 
@@ -71,62 +70,109 @@
  </div>
  <script type='text/javascript'>
 
-   $("#loginform").submit(function(e){
-    var username = $('#inputUsername').val();
-    var password = $('#inputPassword').val();
-    $('#inputPassword').val('****');
-    $('#sbutton').text('verifying');
-    $('#sbutton').prop('disabled', true);
-    $('#inputUsername').prop('disabled', true);
-    $('#inputPassword').prop('disabled', true);
-    $.ajax({
-      url: '/auth/pam',
-      method: 'POST',
-      data: {
-          username: username,
-          password: password
-        },
-      success: function(result) {
-        if (result['success']) {
-          document.location = result['data']['redirect'];
-        } else {
-          $('#sbutton').text('sign in');
-          $('#sbutton').prop('disabled', false);
-          $('#inputUsername').prop('disabled', false);
-          $('#inputPassword').prop('disabled', false);
-          $('#inputPassword').val('');
-          $('#inputPassword').focus();
+ document.getElementById('loginform').addEventListener('submit', function (e) {
+   e.preventDefault();
+
+   const usernameInput = document.getElementById('inputUsername');
+   const passwordInput = document.getElementById('inputPassword');
+   const submitButton = document.getElementById('sbutton');
+
+   const username = usernameInput.value;
+   const password = passwordInput.value;
+
+   passwordInput.value = '****';
+   submitButton.textContent = 'verifying';
+
+   // Disable inputs and button
+   submitButton.disabled = true;
+   usernameInput.disabled = true;
+   passwordInput.disabled = true;
+
+   fetch('/auth/pam', {
+     method: 'POST',
+     headers: {
+       'Content-Type': 'application/x-www-form-urlencoded', // or 'application/json' if backend accepts JSON
+     },
+     body: new URLSearchParams({
+       username: username,
+       password: password
+     })
+   })
+   .then(response => {
+     if (!response.ok) {
+       throw new Error(`HTTP error! Status: ${response.status}`);
+     }
+     return response.json();
+   })
+   .then(result => {
+     if (result.success) {
+       document.location = result.data.redirect;
+     } else {
+       submitButton.textContent = 'sign in';
+       submitButton.disabled = false;
+       usernameInput.disabled = false;
+       passwordInput.disabled = false;
+       passwordInput.value = '';
+       passwordInput.focus();
+     }
+   })
+   .catch(error => {
+     console.error('Login request failed:', error);
+     // Re-enable form and show error message
+     submitButton.textContent = 'sign in';
+     submitButton.disabled = false;
+     usernameInput.disabled = false;
+     passwordInput.disabled = false;
+     passwordInput.value = '';
+     passwordInput.focus();
+   });
+ });
+
+  fetch('/auth/info')
+    .then(response => {
+      if (!response.ok) {
+        throw new Error(`HTTP error! Status: ${response.status}`);
+      }
+      return response.json();
+    })
+    .then(result => {
+      if (result.success) {
+        document.location = result.data.redirect;
+      }
+
+      if (result.data.logo !== '/auth/logon/logo.webp') {
+        const logo = document.getElementById('logo');
+        if (logo) {
+          logo.setAttribute('src', result.data.logo);
         }
       }
+
+      if (result.data.page_title && result.data.page_title !== '') {
+        document.title = result.data.page_title;
+      }
+
+      if (result.data.message && result.data.message !== '') {
+        const modalContent = document.getElementById('sanic-modal-contents');
+        if (modalContent) {
+          modalContent.innerHTML = result.data.message;
+        }
+
+        if (typeof UIkit !== 'undefined' && UIkit.modal) {
+          UIkit.modal("#sanic-modal").toggle();
+        }
+
+        const ackButton = document.getElementById('ack');
+        if (ackButton) {
+          ackButton.focus();
+        }
+      }
+    })
+    .catch(error => {
+      console.error('Error fetching auth info:', error);
     });
-    e.preventDefault();
-  });
 
-  $.ajax({
-    url: '/auth/info',
-    method: 'GET',
-    success: function(result) {
-      if (result['success']) {
-        document.location = result['data']['redirect'];
-      }
-      if (result['data']['logo'] != '/auth/logon/logo.webp') {
-        $('#logo').attr("src", result['data']['logo']);
-      }
-      if (result['data']['page_title'] && result['data']['page_title'] != '') {
-        document.title = result['data']['page_title'];
-      }
-      if (result['data']['message'] && result['data']['message'] != '') {
-        $('#sanic-modal-contents').html(result['data']['message']);
-        UIkit.modal("#sanic-modal").toggle();
-        $('#ack').focus();
-      }
-    }
-  });
-
-  $('#sanic-modal').on({
-    'hide.uk.modal': function(){
-       $('#inputUsername').focus();
-    }
+  document.getElementById('sanic-modal').addEventListener('hide.uk.modal', function () {
+    document.getElementById('inputUsername').focus();
   });
 
  </script>

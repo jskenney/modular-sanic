@@ -10,7 +10,6 @@
 
  <script src="/uikit/uikit.min.js"></script>
  <script src="/uikit/uikit-icons.min.js"></script>
- <script src="/uikit/jquery.js"></script>
 
  <title>Site Logon</title>
 
@@ -65,51 +64,121 @@
  </div>
  <script type='text/javascript'>
 
-   $("#loginform").submit(function(e){
-    var username = $('#inputUsername').val();
-    $('#sbutton').text('verifying');
-    $('#sbutton').prop('disabled', true);
-    $('#inputUsername').prop('disabled', true);
-    $('#inputPassword').prop('disabled', true);
-    $.ajax({
-      url: '/auth/su',
+  document.getElementById('loginform').addEventListener('submit', function (e) {
+    e.preventDefault();
+
+    const usernameInput = document.getElementById('inputUsername');
+    const passwordInput = document.getElementById('inputPassword');
+    const submitButton = document.getElementById('sbutton');
+
+    const username = usernameInput.value;
+
+    // UI feedback and disable inputs
+    submitButton.textContent = 'verifying';
+    submitButton.disabled = true;
+    usernameInput.disabled = true;
+    if (passwordInput) passwordInput.disabled = true;
+
+    fetch('/auth/su', {
       method: 'POST',
-      dataType: 'json',
-      contentType : 'application/json',
-      data: JSON.stringify({ username: username }),
-      success: function(result) {
-        if (result['success']) {
-          document.location = result['data']['redirect'];
-        } else {
-          $('#sbutton').text('system failure');
-          $('#sanic-modal-contents').html('Failure in attempt to switch users.');
-          UIkit.modal("#sanic-modal").toggle();
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ username: username })
+    })
+    .then(response => {
+      if (!response.ok) {
+        throw new Error(`HTTP error! Status: ${response.status}`);
+      }
+      return response.json();
+    })
+    .then(result => {
+      if (result.success) {
+        document.location = result.data.redirect;
+      } else {
+        submitButton.textContent = 'system failure';
+
+        const modalContents = document.getElementById('sanic-modal-contents');
+        if (modalContents) {
+          modalContents.innerHTML = 'Failure in attempt to switch users.';
+        }
+
+        if (typeof UIkit !== 'undefined' && UIkit.modal) {
+          UIkit.modal('#sanic-modal').toggle();
         }
       }
+    })
+    .catch(error => {
+      console.error('User switch request failed:', error);
+      submitButton.textContent = 'system failure';
+
+      const modalContents = document.getElementById('sanic-modal-contents');
+      if (modalContents) {
+        modalContents.innerHTML = 'An error occurred while trying to switch users.';
+      }
+
+      if (typeof UIkit !== 'undefined' && UIkit.modal) {
+        UIkit.modal('#sanic-modal').toggle();
+      }
     });
-    e.preventDefault();
   });
 
-  $.ajax({
-    url: '/auth/info',
-    method: 'GET',
-    success: function(result) {
-      if (!result['success'] || !result['data'].hasOwnProperty('access') || !result['data']['access'].hasOwnProperty('admin') || !result['data']['access']['admin'].includes('become')) {
-        $('#sbutton').text('access denied');
-        $('#sbutton').prop('disabled', true);
-        $('#inputUsername').prop('disabled', true);
-        $('#inputPassword').prop('disabled', true);
-        $('#sanic-modal-contents').html('You must be logged in as an administrator to use this feature.');
-        UIkit.modal("#sanic-modal").toggle();
+  fetch('/auth/info')
+    .then(response => {
+      if (!response.ok) {
+        throw new Error(`HTTP error! Status: ${response.status}`);
       }
-      if (result['data']['logo'] != '/auth/logon/logo.webp') {
-        $('#logo').attr("src", result['data']['logo']);
+      return response.json();
+    })
+    .then(result => {
+      const data = result.data;
+
+      const submitButton = document.getElementById('sbutton');
+      const usernameInput = document.getElementById('inputUsername');
+      const passwordInput = document.getElementById('inputPassword');
+
+      // Access control check
+      const hasAccess =
+        result.success &&
+        data.hasOwnProperty('access') &&
+        data.access.hasOwnProperty('admin') &&
+        Array.isArray(data.access.admin) &&
+        data.access.admin.includes('become');
+
+      if (!hasAccess) {
+        if (submitButton) {
+          submitButton.textContent = 'access denied';
+          submitButton.disabled = true;
+        }
+        if (usernameInput) usernameInput.disabled = true;
+        if (passwordInput) passwordInput.disabled = true;
+
+        const modalContents = document.getElementById('sanic-modal-contents');
+        if (modalContents) {
+          modalContents.innerHTML = 'You must be logged in as an administrator to use this feature.';
+        }
+
+        if (typeof UIkit !== 'undefined' && UIkit.modal) {
+          UIkit.modal('#sanic-modal').toggle();
+        }
       }
-      if (result['data']['page_title'] && result['data']['page_title'] != '') {
-        document.title = result['data']['page_title'];
+
+      // Update logo if different from default
+      if (data.logo && data.logo !== '/auth/logon/logo.webp') {
+        const logoEl = document.getElementById('logo');
+        if (logoEl) {
+          logoEl.setAttribute('src', data.logo);
+        }
       }
-    }
-  });
+
+      // Update page title if provided
+      if (data.page_title && data.page_title.trim() !== '') {
+        document.title = data.page_title;
+      }
+    })
+    .catch(error => {
+      console.error('Error fetching auth info:', error);
+    });
 
  </script>
 </body>

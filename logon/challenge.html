@@ -10,7 +10,6 @@
 
  <script src="/uikit/uikit.min.js"></script>
  <script src="/uikit/uikit-icons.min.js"></script>
- <script src="/uikit/jquery.js"></script>
 
  <title>Site Challenge Request</title>
 
@@ -73,95 +72,165 @@
 
    var currentStep = 'initial';
 
-   $("#loginform").submit(function(e){
-    var username = $('#inputUsername').val();
-    var password = $('#inputPassword').val();
-    $('#sbutton').prop('disabled', true);
-    $('#inputUsername').prop('disabled', true);
-    $('#inputPassword').prop('disabled', true);
-    if (currentStep == 'initial') {
-      $('#sbutton').text('requesting');
-      $.ajax({
-        url: '/auth/request/challenge',
-        method: 'POST',
-        dataType: 'json',
-        contentType : 'application/json',
-        data: JSON.stringify({ username: username }),
-        success: function(result) {
-          if (result['success']) {
-            currentStep = 'challenge';
-            $('#inputPassword').prop('disabled', false);
-            $('#inputPassword').val('');
-            $('#inputPassword').focus();
-            $('#sbutton').text('enter challenge');
-            $('#sbutton').prop('disabled', false);
-          }
-        },
-        error: function(jqXHR, textStatus, errorThrown) {
-          $('#sanic-modal-contents').html('This site has not been configured for challenge and response authentication, please contact the administrator or use a different logon method.');
-          UIkit.modal("#sanic-modal").toggle();
-        }
-      });
-    } else {
-      $('#sbutton').text('validating');
-      $('#inputPassword').val('****');
-      $.ajax({
-        url: '/auth/challenge',
-        method: 'POST',
-        dataType: 'json',
-        contentType : 'application/json',
-        data: JSON.stringify({ username: username, challenge: password }),
-        success: function(result) {
-          if (result['success']) {
-            document.location = result['data']['redirect'];
-          } else {
-            $('#inputPassword').prop('disabled', false);
-            $('#inputPassword').val('');
-            $('#inputPassword').focus();
-            $('#sbutton').text('enter challenge');
-            $('#sbutton').prop('disabled', false);
-          }
-        }
-      });
-    }
+   document.getElementById('loginform').addEventListener('submit', function (e) {
     e.preventDefault();
+
+    const usernameInput = document.getElementById('inputUsername');
+    const passwordInput = document.getElementById('inputPassword');
+    const submitButton = document.getElementById('sbutton');
+
+    const username = usernameInput.value;
+    const password = passwordInput.value;
+
+    // Disable inputs
+    submitButton.disabled = true;
+    usernameInput.disabled = true;
+    passwordInput.disabled = true;
+
+    if (currentStep === 'initial') {
+      submitButton.textContent = 'requesting';
+
+      fetch('/auth/request/challenge', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ username: username })
+      })
+        .then(response => {
+          if (!response.ok) throw new Error('Challenge request failed');
+          return response.json();
+        })
+        .then(result => {
+          if (result.success) {
+            currentStep = 'challenge';
+            passwordInput.disabled = false;
+            passwordInput.value = '';
+            passwordInput.focus();
+            submitButton.textContent = 'enter challenge';
+            submitButton.disabled = false;
+          }
+        })
+        .catch(error => {
+          console.error('Challenge request error:', error);
+
+          const modalContents = document.getElementById('sanic-modal-contents');
+          if (modalContents) {
+            modalContents.innerHTML =
+              'This site has not been configured for challenge and response authentication, please contact the administrator or use a different logon method.';
+          }
+
+          if (typeof UIkit !== 'undefined' && UIkit.modal) {
+            UIkit.modal('#sanic-modal').toggle();
+          }
+        });
+    } else {
+      submitButton.textContent = 'validating';
+      passwordInput.value = '****';
+
+      fetch('/auth/challenge', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ username: username, challenge: password })
+      })
+        .then(response => {
+          if (!response.ok) throw new Error('Challenge validation failed');
+          return response.json();
+        })
+        .then(result => {
+          if (result.success) {
+            document.location = result.data.redirect;
+          } else {
+            passwordInput.disabled = false;
+            passwordInput.value = '';
+            passwordInput.focus();
+            submitButton.textContent = 'enter challenge';
+            submitButton.disabled = false;
+          }
+        })
+        .catch(error => {
+          console.error('Challenge validation error:', error);
+          passwordInput.disabled = false;
+          passwordInput.value = '';
+          passwordInput.focus();
+          submitButton.textContent = 'enter challenge';
+          submitButton.disabled = false;
+        });
+    }
   });
 
-  $(document).ready(function() {
-    const queryString = window.location.search;
-    const urlParams   = new URLSearchParams(queryString);
-    const reqUser     = decodeURIComponent(urlParams.get('user'));
-    if (reqUser != 'null') {
-      $('#inputUsername').prop('disabled', true);
-      $('#inputUsername').val(reqUser);
-      $('#inputPassword').prop('disabled', false);
-      $('#inputPassword').val('');
-      $('#inputPassword').focus();
-      $('#sbutton').text('enter challenge');
-      $('#sbutton').prop('disabled', false);
-      currentStep = 'challenge';
-    }
-    $.ajax({
-      url: '/auth/info',
-      method: 'GET',
-      success: function(result) {
-        if (result['success']) {
-          document.location = result['data']['redirect'];
-        }
-        if (result['data']['logo'] != '/auth/logon/logo.webp') {
-          $('#logo').attr("src", result['data']['logo']);
-        }
-        if (result['data']['page_title'] && result['data']['page_title'] != '') {
-          document.title = result['data']['page_title'];
-        }
-        if (result['data']['message'] && result['data']['message'] != '') {
-          $('#sanic-modal-contents').html(result['data']['message']);
-          UIkit.modal("#sanic-modal").toggle();
-          $('#ack').focus();
-        }
-      }
-    });
+  document.addEventListener('DOMContentLoaded', function () {
+  const queryString = window.location.search;
+  const urlParams = new URLSearchParams(queryString);
+  const reqUser = decodeURIComponent(urlParams.get('user'));
+
+  const usernameInput = document.getElementById('inputUsername');
+  const passwordInput = document.getElementById('inputPassword');
+  const submitButton = document.getElementById('sbutton');
+
+  if (reqUser && reqUser !== 'null') {
+   if (usernameInput) {
+     usernameInput.disabled = true;
+     usernameInput.value = reqUser;
+   }
+   if (passwordInput) {
+     passwordInput.disabled = false;
+     passwordInput.value = '';
+     passwordInput.focus();
+   }
+   if (submitButton) {
+     submitButton.textContent = 'enter challenge';
+     submitButton.disabled = false;
+   }
+   currentStep = 'challenge';
+  }
+
+  // Fetch auth info
+  fetch('/auth/info')
+   .then(response => {
+     if (!response.ok) throw new Error(`HTTP error! Status: ${response.status}`);
+     return response.json();
+   })
+   .then(result => {
+     const data = result.data;
+
+     if (result.success && data.redirect) {
+       document.location = data.redirect;
+       return; // skip UI updates after redirect
+     }
+
+     if (data.logo && data.logo !== '/auth/logon/logo.webp') {
+       const logoEl = document.getElementById('logo');
+       if (logoEl) {
+         logoEl.setAttribute('src', data.logo);
+       }
+     }
+
+     if (data.page_title && data.page_title.trim() !== '') {
+       document.title = data.page_title;
+     }
+
+     if (data.message && data.message.trim() !== '') {
+       const modalContents = document.getElementById('sanic-modal-contents');
+       if (modalContents) {
+         modalContents.innerHTML = data.message;
+       }
+       if (typeof UIkit !== 'undefined' && UIkit.modal) {
+         UIkit.modal('#sanic-modal').toggle();
+       }
+       const ackBtn = document.getElementById('ack');
+       if (ackBtn) {
+         ackBtn.focus();
+       }
+     }
+   })
+   .catch(error => {
+     console.error('Error loading /auth/info:', error);
+   });
   });
+
 
  </script>
  </html>

@@ -10,7 +10,6 @@
 
  <script src="/uikit/uikit.min.js"></script>
  <script src="/uikit/uikit-icons.min.js"></script>
- <script src="/uikit/jquery.js"></script>
 
  <title>Site API Logon</title>
 
@@ -71,56 +70,138 @@
  </div>
  <script type='text/javascript'>
 
-   $("#loginform").submit(function(e){
-    var username = $('#inputUsername').val();
-    var password = $('#inputPassword').val();
-    $('#inputPassword').val('****');
-    $('#sbutton').text('verifying');
-    $('#sbutton').prop('disabled', true);
-    $('#inputUsername').prop('disabled', true);
-    $('#inputPassword').prop('disabled', true);
-    $.ajax({
-      url: '/auth/apikey',
-      method: 'POST',
-      dataType: 'json',
-      contentType: 'application/json',
-      data: JSON.stringify({ username: username, apikey: password }),
-      success: function(result) {
-        if (result['success']) {
-          document.location = result['data']['redirect'];
-        } else {
-          $('#sbutton').text('sign in');
-          $('#sbutton').prop('disabled', false);
-          $('#inputUsername').prop('disabled', false);
-          $('#inputPassword').prop('disabled', false);
-          $('#inputPassword').val('');
-          $('#inputPassword').focus();
-        }
-      }
-    });
+  //  $("#loginform").submit(function(e){
+  //   var username = $('#inputUsername').val();
+  //   var password = $('#inputPassword').val();
+  //   $('#inputPassword').val('****');
+  //   $('#sbutton').text('verifying');
+  //   $('#sbutton').prop('disabled', true);
+  //   $('#inputUsername').prop('disabled', true);
+  //   $('#inputPassword').prop('disabled', true);
+  //   $.ajax({
+  //     url: '/auth/apikey',
+  //     method: 'POST',
+  //     dataType: 'json',
+  //     contentType: 'application/json',
+  //     data: JSON.stringify({ username: username, apikey: password }),
+  //     success: function(result) {
+  //       if (result['success']) {
+  //         document.location = result['data']['redirect'];
+  //       } else {
+  //         $('#sbutton').text('sign in');
+  //         $('#sbutton').prop('disabled', false);
+  //         $('#inputUsername').prop('disabled', false);
+  //         $('#inputPassword').prop('disabled', false);
+  //         $('#inputPassword').val('');
+  //         $('#inputPassword').focus();
+  //       }
+  //     }
+  //   });
+  //   e.preventDefault();
+  // });
+
+  document.getElementById('loginform').addEventListener('submit', function (e) {
     e.preventDefault();
+
+    const usernameInput = document.getElementById('inputUsername');
+    const passwordInput = document.getElementById('inputPassword');
+    const submitButton = document.getElementById('sbutton');
+
+    const username = usernameInput.value;
+    const apikey = passwordInput.value;
+
+    // Mask password visually
+    passwordInput.value = '****';
+
+    // Disable inputs and update button
+    submitButton.textContent = 'verifying';
+    submitButton.disabled = true;
+    usernameInput.disabled = true;
+    passwordInput.disabled = true;
+
+    fetch('/auth/apikey', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ username: username, apikey: apikey })
+    })
+      .then(response => {
+        if (!response.ok) {
+          throw new Error(`HTTP error! Status: ${response.status}`);
+        }
+        return response.json();
+      })
+      .then(result => {
+        if (result.success) {
+          document.location = result.data.redirect;
+        } else {
+          // Re-enable form and reset password field
+          submitButton.textContent = 'sign in';
+          submitButton.disabled = false;
+          usernameInput.disabled = false;
+          passwordInput.disabled = false;
+          passwordInput.value = '';
+          passwordInput.focus();
+        }
+      })
+      .catch(error => {
+        console.error('API key login error:', error);
+        // Fallback UI on fetch error
+        submitButton.textContent = 'sign in';
+        submitButton.disabled = false;
+        usernameInput.disabled = false;
+        passwordInput.disabled = false;
+        passwordInput.value = '';
+        passwordInput.focus();
+      });
   });
 
-  $.ajax({
-    url: '/auth/info',
-    method: 'GET',
-    success: function(result) {
-      if (result['success']) {
-        document.location = result['data']['redirect'];
+
+  fetch('/auth/info')
+    .then(response => {
+      if (!response.ok) {
+        throw new Error(`HTTP error! Status: ${response.status}`);
       }
-      if (result['data']['logo'] != '/auth/logon/logo.webp') {
-        $('#logo').attr("src", result['data']['logo']);
+      return response.json();
+    })
+    .then(result => {
+      if (result.success) {
+        document.location = result.data.redirect;
       }
-      if (result['data']['page_title'] && result['data']['page_title'] != '') {
-        document.title = result['data']['page_title'];
+
+      if (result.data.logo !== '/auth/logon/logo.webp') {
+        const logo = document.getElementById('logo');
+        if (logo) {
+          logo.setAttribute('src', result.data.logo);
+        }
       }
-      if (result['data']['message'] && result['data']['message'] != '') {
-        $('#sanic-modal-contents').html(result['data']['message']);
-        UIkit.modal("#sanic-modal").toggle();
-        $('#ack').focus();
+
+      if (result.data.page_title && result.data.page_title !== '') {
+        document.title = result.data.page_title;
       }
-    }
-  });
+
+      if (result.data.message && result.data.message !== '') {
+        const modalContent = document.getElementById('sanic-modal-contents');
+        if (modalContent) {
+          modalContent.innerHTML = result.data.message;
+        }
+
+        // Toggle UIkit modal
+        if (typeof UIkit !== 'undefined' && UIkit.modal) {
+          UIkit.modal("#sanic-modal").toggle();
+        }
+
+        const ackButton = document.getElementById('ack');
+        if (ackButton) {
+          ackButton.focus();
+        }
+      }
+    })
+    .catch(error => {
+      console.error('Error fetching auth info:', error);
+    });
+
  </script>
 </body>
 </html>

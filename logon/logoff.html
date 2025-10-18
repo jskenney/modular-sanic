@@ -10,7 +10,6 @@
 
  <script src="/uikit/uikit.min.js"></script>
  <script src="/uikit/uikit-icons.min.js"></script>
- <script src="/uikit/jquery.js"></script>
 
  <title>Site Logon</title>
 
@@ -71,25 +70,47 @@
  </div>
  <script type='text/javascript'>
 
-  $.ajax({
-    url: '/auth/deauth',
-    method: 'GET',
-    success: function(result) {
-      if (result['data']['redirect']) {
-        document.location = result['data']['redirect'];
+  fetch('/auth/deauth')
+    .then(response => {
+      if (!response.ok) {
+        throw new Error(`HTTP error! Status: ${response.status}`);
       }
-      if (result['data']['logo'] != '/auth/logon/logo.webp') {
-        $('#logo').attr("src", result['data']['logo']);
+      return response.json();
+    })
+    .then(result => {
+      const data = result.data;
+
+      if (data.redirect) {
+        document.location = data.redirect;
       }
-      if (result['data']['page_title'] && result['data']['page_title'] != '') {
-        document.title = result['data']['page_title'];
+
+      if (data.logo && data.logo !== '/auth/logon/logo.webp') {
+        const logoEl = document.getElementById('logo');
+        if (logoEl) {
+          logoEl.setAttribute('src', data.logo);
+        }
       }
-      if (result['data']['message'] && result['data']['message'] != '') {
-        $('#sanic-modal-contents').html(result['data']['message']);
-        UIkit.modal("#sanic-modal").toggle();
+
+      if (data.page_title && data.page_title !== '') {
+        document.title = data.page_title;
       }
-    }
-  });
+
+      if (data.message && data.message !== '') {
+        const modalContents = document.getElementById('sanic-modal-contents');
+        if (modalContents) {
+          modalContents.innerHTML = data.message;
+        }
+
+        // Toggle modal via UIkit
+        if (typeof UIkit !== 'undefined' && UIkit.modal) {
+          UIkit.modal('#sanic-modal').toggle();
+        }
+      }
+    })
+    .catch(error => {
+      console.error('Error during deauth:', error);
+    });
+
 
  </script>
 </body>
