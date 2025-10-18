@@ -45,7 +45,7 @@ web_settings = {
     # The following values are located depending on system configurations and are
     # NOT relative to the location of server.py.
     'REDIRECT_LOGON_SUCCESSFUL': '/index.html',          # Redirect after successful logon
-    'REDIRECT_LOGON_FAILED':     '/auth/logon/apifile.html',  # Redirect after unsuccessful logon
+    'REDIRECT_LOGON_FAILED':     '/auth/logon/logon.html',  # Redirect after unsuccessful logon
     'REDIRECT_LOGOFF':           '/index.html',          # Redirect after logoff
     'CHALLENGE_PAGE':            '/auth/logon/challenge.html',# Page for authentication challenges
     'LOGON_LOGO':                '/auth/logon/logo.webp',     # Large image for logon pages
