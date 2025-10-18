@@ -9,8 +9,6 @@
   <link rel="stylesheet" href="/uikit/uikit.min.css">
 
   <script src="/uikit/uikit.min.js"></script>
-  <script src="/uikit/uikit-icons.min.js"></script>
-  <script src="/uikit/jquery.js"></script>
 
   <title>Start Page</title>
 
@@ -22,7 +20,6 @@
 <a href="/auth/logon/challenge.html">/auth/logon/challenge.html</a> - Email Challenge Authentication     (will redirect if logged on)
 <a href="/auth/logon/apikey.html">/auth/logon/apikey.html</a>    - API Key Authentication             (will redirect if logged on)
 <a href="/auth/logon/apifile.html">/auth/logon/apifile.html</a>   - API Key File Upload Authentication (will redirect if logged on)
-<a href="/auth/logon/usna.html">/auth/logon/usna.html</a>      - USNA SSO Authentication            (will redirect if logged on)
 
 <a href="/auth/logon/logoff.html">/auth/logon/logoff.html</a>    - Logoff
 
@@ -33,7 +30,7 @@
 <a href="/auth/info">/auth/info</a>                 - Show User and Site Info (used on auth websites)
 <a href="/auth/rekey">/auth/rekey</a>                - Reset API Key
 <h4>API Key (Provided for debugging and inserted automatically into most examples below)</h4>
-<span id=akey>Pending jquery response...</span>
+<span id=akey>Pending jquery response...  Note: API keys are unavailable if MySQL database is not used.</span>
 <h4>Logged on User Information (Provided for debugging)</h4>
 <span id=info>Pending jquery response...</span>
 <h3>Endpoints below require an API key, key is ignored if a valid web session is found.</h3><h4>Access Endpoints</h4>/&lt;apikey&gt;/auth/access/list/&lt;user&gt;                    - Lists Accesses (requires admin for other users)
@@ -43,26 +40,31 @@
 <br><br><br>
 <script>
 
-$.ajax({
-  url: '/auth/key',
-  method: 'GET',
-  success: function(result) {
-    $('#info').html(JSON.stringify(result, null, 2));
+fetch('/auth/key')
+  .then(response => {
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    return response.json();
+  })
+  .then(result => {
+    document.getElementById('info').textContent = JSON.stringify(result, null, 2);
     console.log(result);
-    console.log(result['data']['apikey']);
-    $('#akey').html(result['data']['apikey']);
-    if (result['data']['apikey']) {
+    if (result.data.apikey) {
+      document.getElementById('akey').textContent = result.data.apikey;
       const links = document.querySelectorAll('a[href]');
       links.forEach(link => {
         let href = link.getAttribute('href');
-        const newHref = href.replace('/aaaa/', '/'+result['data']['apikey']+'/');
+        const newHref = href.replace('/aaaa/', '/' + result.data.apikey + '/');
         if (newHref !== href) {
           link.setAttribute('href', newHref);
-          link.textContent = link.textContent.replace('<apikey>', result['data']['apikey']);
+          link.textContent = link.textContent.replace('<apikey>', result.data.apikey);
         }
       });
     }
-  }
-});
+  })
+  .catch(error => {
+    console.error('Error fetching API key:', error);
+  });
 
 </script>
