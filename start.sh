@@ -11,7 +11,7 @@ if [ ! -d venv ]; then
   # Install required packages
   pip install --upgrade pip
   pip install --upgrade setuptools
-  pip install sanic sanic-ext aiomysql python-pam six aiomcache cryptography mysqlclient pymemcache oracledb
+  pip install sanic sanic-ext aiomysql python-pam six aiomcache cryptography mysqlclient pymemcache
 
   # There is a bug in sanic-session, so we need python 3.11 and the repo below until it is fixed
   python -B -m pip install sanic_session@git+https://github.com/jskenney/sanic-session
