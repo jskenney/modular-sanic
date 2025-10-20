@@ -97,12 +97,12 @@ async def system_rekey(request):
     return res
 
 # Switch Users (assuming admin access)
-@sub_bp.route("/<apikey>/auth/access/list/<user>", methods=['GET'])
+@sub_bp.route("/auth/<apikey>/access/list/<user>", methods=['GET'])
 async def system_access_list(request, apikey, user):
     """
     Provides the access key/value pairs for a specific user.  Must be either current user or have admin/permissions access.
     """
-    endpoint = '/<apikey>/auth/access/list/'+user
+    endpoint = '/auth/<apikey>/access/list/'+user
     ok, username, apikey, access, info = await request.app.ctx.auth.verifyapi(request, apikey)
     if username == user or ('admin' in access and 'permissions' in access['admin']):
         user, apikey, info, access = await request.app.ctx.auth.access_show(request, user)
@@ -112,12 +112,12 @@ async def system_access_list(request, apikey, user):
     return res
 
 # Switch Users (assuming admin access)
-@sub_bp.route("/<apikey>/auth/access/add/<user>/<access>/<value>", methods=['GET'])
+@sub_bp.route("/auth/<apikey>/access/add/<user>/<access>/<value>", methods=['GET'])
 async def system_access_add(request, apikey, user, access, value):
     """
     Add specific access key/value pairs for a user, must be a user with admin/permissions access.
     """
-    endpoint = '/<apikey>/auth/access/add/'+user+'/'+access+'/'+value
+    endpoint = '/auth/<apikey>/access/add/'+user+'/'+access+'/'+value
     naccess = access
     nvalue = value
     ok, username, apikey, access, info = await request.app.ctx.auth.verifyapi(request, apikey)
@@ -130,12 +130,12 @@ async def system_access_add(request, apikey, user, access, value):
     return res
 
 # Switch Users (assuming admin access)
-@sub_bp.route("/<apikey>/auth/access/remove/<user>/<access>/<value>", methods=['GET'])
+@sub_bp.route("/auth/<apikey>/access/remove/<user>/<access>/<value>", methods=['GET'])
 async def system_access_remove(request, apikey, user, access, value):
     """
     Remove a specific access key/value pair for a user, must be a user with admin/permissions access.
     """
-    endpoint = '/<apikey>/auth/access/remove/'+user+'/'+access+'/'+value
+    endpoint = '/auth/<apikey>/access/remove/'+user+'/'+access+'/'+value
     naccess = access
     nvalue = value
     ok, username, apikey, access, info = await request.app.ctx.auth.verifyapi(request, apikey)
