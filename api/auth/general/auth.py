@@ -146,3 +146,33 @@ async def system_access_remove(request, apikey, user, access, value):
     else:
         res = response.json({'success': False, 'sent': time.asctime(time.localtime(time.time())), 'endpoint':endpoint, 'data':{'username': username, 'access': {}}})
     return res
+
+# Show redirect if logged on
+@sub_bp.route("/auth/redirect_if_logged_on", methods=['GET'])
+async def system_if_logged_on(request):
+    """
+    Provide redirect to REDIRECT_LOGON_SUCCESSFUL if logged on.
+    """
+    endpoint = '/auth/redirect_if_logged_on'
+    ok, username, apikey, access, info = await request.app.ctx.auth.verify(request)
+    if ok:
+        redirect = request.app.config.REDIRECT_LOGON_SUCCESSFUL
+        res = response.json({'success': ok, 'sent': time.asctime(time.localtime(time.time())), 'endpoint': endpoint, 'data':{'redirect': redirect}})
+    else:
+        res = response.json({'success': ok, 'sent': time.asctime(time.localtime(time.time())), 'endpoint': endpoint, 'data':{}})
+    return res
+
+# Show redirect if logged off
+@sub_bp.route("/auth/redirect_if_logged_off", methods=['GET'])
+async def system_if_logged_off(request):
+    """
+    Provide redirect to REDIRECT_LOGON_FAILED if logged off.
+    """
+    endpoint = '/auth/redirect_if_logged_off'
+    ok, username, apikey, access, info = await request.app.ctx.auth.verify(request)
+    if ok:
+        res = response.json({'success': ok, 'sent': time.asctime(time.localtime(time.time())), 'endpoint': endpoint, 'data':{}})
+    else:
+        redirect = request.app.config.REDIRECT_LOGON_FAILED
+        res = response.json({'success': ok, 'sent': time.asctime(time.localtime(time.time())), 'endpoint': endpoint, 'data':{'redirect': redirect}})
+    return res
