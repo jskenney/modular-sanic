@@ -1,0 +1,13 @@
+setuptools
+sanic
+sanic-ext
+aiomysql
+python-pam
+six
+aiomcache
+cryptography
+mysqlclient
+pymemcache
+sanic_session@git+https://github.com/jskenney/sanic-session
+
+
