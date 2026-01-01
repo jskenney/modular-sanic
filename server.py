@@ -113,13 +113,13 @@ for source in (app.config.API_LOCATIONS):
 # Optional, but functionality will be limited.
 # Set MEMCACHEAVAIL = False in the config file to prevent memcached usage.
 @app.listener('before_server_start')
-async def setup_memcache(app, loop):
+async def setup_memcache(app):
     if not 'MEMCACHEAVAIL' in app.config or app.config.MEMCACHEAVAIL:
         app.ctx.mc = aiomcache.Client(app.config.MEMCACHED_SERVER, app.config.MEMCACHED_PORT)
         print("Notice: Memcached connection pool created.")
 
 @app.listener('after_server_stop')
-async def close_memcache(app, loop):
+async def close_memcache(app):
     if not 'MEMCACHEAVAIL' in app.config or app.config.MEMCACHEAVAIL:
         await app.ctx.mc.close()
         print("Notice: Memcached connection pool closed.")
@@ -129,7 +129,7 @@ async def close_memcache(app, loop):
 # MySQL available will limit functionality, including authentication options.
 # Set MYSQLAVAIL = False in the config file to prevent MySQL from Loading.
 @app.listener('before_server_start')
-async def setup_db(app, loop):
+async def setup_db(app):
     if not 'MYSQLAVAIL' in app.config or app.config.MYSQLAVAIL:
         try:
             app.ctx.pool = await aiomysql.create_pool(
@@ -138,10 +138,8 @@ async def setup_db(app, loop):
                 user=app.config.DB_USER,
                 password=app.config.DB_PASS,
                 db=app.config.DB_NAME,
-                loop=loop,
                 autocommit=True
             )
-            app.ctx.loop = loop
             app.config.MYSQLAVAIL = True
             print("Notice: Database connection pool created.")
         except:
@@ -149,7 +147,7 @@ async def setup_db(app, loop):
             print("Notice: Database connection failed.")
 
 @app.listener('after_server_stop')
-async def close_db(app, loop):
+async def close_db(app):
     if app.config.MYSQLAVAIL:
         app.ctx.pool.close()
         await app.ctx.pool.wait_closed()
@@ -316,6 +314,6 @@ class AuthVerification:
                 return user, apikey, info, access
 
 @app.listener('before_server_start')
-async def setup_auth(app, loop):
+async def setup_auth(app):
     app.ctx.auth = AuthVerification()
     app.ctx.pam = pam.pam()
