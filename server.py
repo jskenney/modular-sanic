@@ -79,6 +79,9 @@ if 'PAGE_500' in app.config and os.path.exists(app.config.PAGE_500):
     @app.exception(ServerError)
     async def handle_server_errors(request, exception):
         return html(open(app.config.PAGE_500).read(), status=500)
+    @app.exception(Exception)
+    async def handle_all_server_errors(request, exception):
+        return html(open(app.config.PAGE_500).read(), status=500)
 
 ###############################################################################
 # Block documentation generation
