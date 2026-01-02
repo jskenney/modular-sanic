@@ -2,7 +2,7 @@
 # Import Required Python Libraries
 import asyncio, aiomysql, aiomcache, pymemcache
 from sanic import Sanic, response
-from sanic.exceptions import NotFound, ServerError
+from sanic.exceptions import NotFound, ServerError, NotADirectoryError
 from sanic.response import text, json, html, redirect, empty
 from sanic_session import Session, MemcacheSessionInterface, InMemorySessionInterface
 import pam, os, importlib.util, time, uuid, sys
@@ -78,6 +78,9 @@ if 'PAGE_500' in app.config and os.path.exists(app.config.PAGE_500):
     print("Notice: Configuring Page 500.")
     @app.exception(ServerError)
     async def handle_server_errors(request, exception):
+        return html(open(app.config.PAGE_500).read(), status=500)
+    @app.exception(NotADirectoryError)
+    async def handle_server_errors_notadir(request, exception):
         return html(open(app.config.PAGE_500).read(), status=500)
 
 ###############################################################################
