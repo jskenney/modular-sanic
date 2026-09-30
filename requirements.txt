@@ -1,4 +1,5 @@
 setuptools
+wheel
 sanic
 sanic-ext
 aiomysql
@@ -8,6 +9,9 @@ aiomcache
 cryptography
 mysqlclient
 pymemcache
+orjson
+ujson
+pydantic
 sanic_session@git+https://github.com/jskenney/sanic-session
 
 
