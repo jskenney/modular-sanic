@@ -12,6 +12,7 @@ pymemcache
 orjson
 ujson
 pydantic
+environs
 sanic_session@git+https://github.com/jskenney/sanic-session
 
 
