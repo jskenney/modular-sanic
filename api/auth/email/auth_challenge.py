@@ -25,11 +25,11 @@ async def system_challenge(request):
                 query = 'UPDATE sanic_challenge SET attempts = attempts + 1 WHERE user=%s'
                 values = (user, )
                 await cur.execute(query, values)
-                res = response.json({'success': False, 'sent': time.asctime(time.localtime(time.time())), 'endpoint':endpoint, 'data':{'username': None, 'apikey': '', 'access': {}, 'info': {}, 'redirect': request.app.config.REDIRECT_LOGON_FAILED}})
+                res = response.json({'success': False, 'sent': time.asctime(time.localtime(time.time())), 'endpoint':endpoint, 'data':{'username': None, 'apikey': '', 'access': {}, 'info': {}, 'redirect': request.app.config.env.str('REDIRECT_LOGON_FAILED', default='/auth/logon/logon.html')}})
                 return res
             query = 'DELETE FROM sanic_challenge WHERE user=%s'
             values = (user,)
             await cur.execute(query, values)
             user, apikey, info, access = await request.app.ctx.auth.logon(request, user)
-            res = response.json({'success': True, 'sent': time.asctime(time.localtime(time.time())), 'endpoint': endpoint, 'data':{'username': user, 'apikey': apikey, 'access': access, 'info': info, 'redirect': request.app.config.REDIRECT_LOGON_SUCCESSFUL}})
+            res = response.json({'success': True, 'sent': time.asctime(time.localtime(time.time())), 'endpoint': endpoint, 'data':{'username': user, 'apikey': apikey, 'access': access, 'info': info, 'redirect': request.app.config.env.str('REDIRECT_LOGON_SUCCESSFUL', default='/index.html')}})
             return res

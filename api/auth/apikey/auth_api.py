@@ -25,10 +25,10 @@ async def system_apikey(request):
             await cur.execute(query, values)
             info = await cur.fetchall()
             if len(info) == 0:
-                res = response.json({'success': False, 'sent': time.asctime(time.localtime(time.time())), 'endpoint': endpoint, 'data':{'username': user, 'apikey': apikey, 'access': access, 'info': info, 'redirect': request.app.config.REDIRECT_LOGON_SUCCESSFUL}})
+                res = response.json({'success': False, 'sent': time.asctime(time.localtime(time.time())), 'endpoint': endpoint, 'data':{'username': user, 'apikey': apikey, 'access': access, 'info': info, 'redirect': request.app.config.env.str('REDIRECT_LOGON_SUCCESSFUL', default='/index.html')}})
                 return res
             user, apikey, info, access = await request.app.ctx.auth.logon(request, user)
-            res = response.json({'success': True, 'sent': time.asctime(time.localtime(time.time())), 'endpoint': endpoint, 'data':{'username': user, 'apikey': apikey, 'access': access, 'info': info, 'redirect': request.app.config.REDIRECT_LOGON_SUCCESSFUL}})
+            res = response.json({'success': True, 'sent': time.asctime(time.localtime(time.time())), 'endpoint': endpoint, 'data':{'username': user, 'apikey': apikey, 'access': access, 'info': info, 'redirect': request.app.config.env.str('REDIRECT_LOGON_SUCCESSFUL', default='/index.html')}})
             return res
 
 @sub_bp.route("/apifile", methods=['POST'])
@@ -81,5 +81,5 @@ async def system_apifile(request):
     if len(info) == 0:
         return response.json({'success': False, 'sent': time.asctime(time.localtime(time.time())), 'endpoint': endpoint, "error": "API key that was sent was invalid.", 'data':{}})
     user, apikey, info, access = await request.app.ctx.auth.logon(request, info[0]['user'])
-    res = response.json({'success': True, 'sent': time.asctime(time.localtime(time.time())), 'endpoint': endpoint, 'data':{'username': user, 'apikey': apikey, 'access': access, 'info': info, 'redirect': request.app.config.REDIRECT_LOGON_SUCCESSFUL}})
+    res = response.json({'success': True, 'sent': time.asctime(time.localtime(time.time())), 'endpoint': endpoint, 'data':{'username': user, 'apikey': apikey, 'access': access, 'info': info, 'redirect': request.app.config.env.str('REDIRECT_LOGON_SUCCESSFUL', default='/index.html')}})
     return res

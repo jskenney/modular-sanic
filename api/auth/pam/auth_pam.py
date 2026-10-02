@@ -19,7 +19,7 @@ async def system_pamauth(request):
     await request.app.ctx.auth.logoff(request)
     if u and p and request.app.ctx.pam.authenticate(u, p):
         user, apikey, info, access = await request.app.ctx.auth.logon(request, u)
-        res = response.json({'success': True, 'sent': time.asctime(time.localtime(time.time())), 'endpoint':endpoint, 'data':{'username': u, 'apikey': apikey, 'access': access, 'info': info, 'redirect': request.app.config.REDIRECT_LOGON_SUCCESSFUL}})
+        res = response.json({'success': True, 'sent': time.asctime(time.localtime(time.time())), 'endpoint':endpoint, 'data':{'username': u, 'apikey': apikey, 'access': access, 'info': info, 'redirect': request.app.config.env.str('REDIRECT_LOGON_SUCCESSFUL', default="/index.html")}})
     else:
-        res = response.json({'success': False, 'sent': time.asctime(time.localtime(time.time())), 'endpoint':endpoint, 'data':{'username': None, 'apikey': apikey, 'access': {}, 'info': {}, 'redirect': request.app.config.REDIRECT_LOGON_FAILED}})
+        res = response.json({'success': False, 'sent': time.asctime(time.localtime(time.time())), 'endpoint':endpoint, 'data':{'username': None, 'apikey': apikey, 'access': {}, 'info': {}, 'redirect': request.app.config.env.str('REDIRECT_LOGON_FAILED', default="/auth/logon/logon.html")}})
     return res

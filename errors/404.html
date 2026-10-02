@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="icon"       href="/favicon.ico">
+  <title>Under Maintenance</title>
+
+  <style>
+    :root {
+      --bg: #f5f6f8;
+      --card: #ffffff;
+      --text: #111827;
+      --border: #e5e7eb;
+      --shadow: 0 10px 30px rgba(0,0,0,.08);
+      --radius: 14px;
+      --maxw: 720px;
+      --font: system-ui, -apple-system, BlinkMacSystemFont, "Helvetica Neue", Helvetica, Arial, sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+
+    body {
+      margin: 0;
+      font-family: var(--font);
+      background: var(--bg);
+      color: var(--text);
+    }
+
+    .viewport-center {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+
+    .container {
+      width: 100%;
+      max-width: var(--maxw);
+    }
+
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 40px 28px;
+    }
+
+    .text-center { text-align: center; }
+
+    h2 {
+      font-size: 1.5rem;
+      font-weight: 500;
+      margin: 0;
+      line-height: 1.4;
+    }
+
+    #hn {
+      font-weight: 700;
+      color: #0056b3;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="viewport-center">
+    <div class="container">
+      <div class="card">
+        <div class="text-center">
+          <h2>The file you requested on <span id=hn>this web server</span> was not found</h2>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      const currentUrl = window.location.hostname;
+      console.log(currentUrl);
+      document.getElementById('hn').textContent = currentUrl;
+    });
+  </script>
+</body>
+</html>

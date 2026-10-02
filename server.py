@@ -5,105 +5,85 @@ from sanic.exceptions import NotFound, ServerError
 from sanic.response import text, json, html, redirect, empty
 from sanic_session import Session, MemcacheSessionInterface, InMemorySessionInterface
 import asyncio, aiomysql, aiomcache, pymemcache
-import pam, os, importlib.util, time, uuid, sys
+import pam, os, importlib.util, time, uuid, sys, environs
 
 ###############################################################################
-# Define the possible locations for the config.py file, will be tried in order.
-# Or use the environmental variable SANIC_CONFIG to provide the path and filename
-config_file_locations = ('../config.py', '../site/config.py', './site/config.py', './config.py')
-if 'SANIC_CONFIG_FILE' in os.environ:
-    config_file_locations = [os.environ['SANIC_CONFIG_FILE']]
-
-###############################################################################
-# Import site configs (config.py) from either the site or local directory.
-alt_site = None
-for possible_site in config_file_locations:
-    if alt_site is None and os.path.exists(possible_site):
-        alt_site = possible_site
-if alt_site is not None:
-    spec = importlib.util.spec_from_file_location("myconfigs", alt_site)
-    myconfigs = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(myconfigs)
-    print("Notice: Loaded config file from", alt_site)
-else:
-    print("Notice: No configuration file detected, exiting.")
-    sys.exit()
+# Use environmental variables and the .env file for configuration settings
+env = environs.Env()
+env.read_env()
 
 ###############################################################################
 # Create Sanic Application
-app = Sanic(myconfigs.site_settings['NAME'])
+app = Sanic(env.str("APP_NAME", default="SanicApp"))
+app.config.env = env
 
 ###############################################################################
-# Loading in settings from config file
-for variable in dir(myconfigs):
-    if not variable.startswith('_'):
-        obj = getattr(myconfigs, variable)
-        app.config.update(obj)
-
-###############################################################################
-# Enable Session Support (Default to Memcached interface), use in-memory model
-# if Memcached is unavailable.
-# Set MEMCACHEAVAIL = False in the config file to prevent memcached usage.
-if not 'MEMCACHEAVAIL' in app.config or app.config.MEMCACHEAVAIL:
-    try:
-        test_client = pymemcache.client.base.Client((app.config.MEMCACHED_SERVER, app.config.MEMCACHED_PORT))
-        test = test_client.get('user')
-        test_client.close()
-    except:
-        app.config.MEMCACHEAVAIL = False
-
-if not 'MEMCACHEAVAIL' in app.config or app.config.MEMCACHEAVAIL:
-    client = aiomcache.Client(app.config.MEMCACHED_SERVER, app.config.MEMCACHED_PORT)
+# Enable Session Support (Default to Memcached interface),
+# use in-memory model if Memcached is unavailable.
+try:
+    test_client = pymemcache.client.base.Client((app.config.env.str('MEMCACHED_SERVER', default='127.0.0.1'),
+                                                 app.config.env.str('MEMCACHED_PORT', default='11211')))
+    test = test_client.get('user')
+    test_client.close()
+    client = aiomcache.Client(app.config.env.str('MEMCACHED_SERVER', default='127.0.0.1'),
+                              app.config.env.str('MEMCACHED_PORT', default='11211'))
     Session(app, interface=MemcacheSessionInterface(client))
     print("Notice: Using Memcached Session Handling")
-else:
+    app.config.MEMCACHEAVAIL = True
+except:
     Session(app)
     print("Notice: Using InMemory Session Handling")
+    app.config.MEMCACHEAVAIL = False
 
 ###############################################################################
 # Determine where the root of the website exists and where
 # the site favicon.ico and /html directory are.
-app.static("/", app.config.HTML, index="index.html", directory_view=app.config.SHOW_SITE_CONTENTS)
-app.static("/favicon.ico", app.config.FAVICON, name='favicon')
+app.static("/",
+           app.config.env.str('HTML', default='./html/'),
+           index="index.html",
+           directory_view=app.config.env.bool('SHOW_SITE_CONTENTS', default=True))
+app.static("/favicon.ico",
+           app.config.env.str('FAVICON', default='./html/favicon.ico'),
+           name='favicon')
 
 ###############################################################################
 # Support providing a file not found page to the user vice a 404
-if 'PAGE_404' in app.config and os.path.exists(app.config.PAGE_404):
+if os.path.exists(app.config.env.str('PAGE_404', default='./html/404.html')):
     print("Notice: Configuring Page 404.")
     @app.exception(NotFound)
     async def handle_not_found(request, exception):
-        return html(open(app.config.PAGE_404).read(), status=404)
+        return html(open(app.config.env.str('PAGE_404', default='./html/404.html')).read(), status=404)
 
-if 'PAGE_500' in app.config and os.path.exists(app.config.PAGE_500):
+if os.path.exists(app.config.env.str('PAGE_500', default='./html/500.html')):
     print("Notice: Configuring Page 500.")
     @app.exception(ServerError)
     async def handle_server_errors(request, exception):
-        return html(open(app.config.PAGE_500).read(), status=500)
+        return html(open(app.config.env.str('PAGE_500', default='./html/500.html')).read(), status=500)
     @app.exception(Exception)
     async def handle_all_server_errors(request, exception):
-        return html(open(app.config.PAGE_500).read(), status=500)
+        return html(open(app.config.env.str('PAGE_500', default='./html/500.html')).read(), status=500)
 
 ###############################################################################
 # Block documentation generation
-if 'DOCUMENTATION' in app.config and app.config.DOCUMENTATION == False:
+if not app.config.env.bool('DOCUMENTATION', default=True):
     print("Notice: Documentation is unavailable.")
     app.config.OAS=False
 
 ###############################################################################
 # To support HSTS, a common organizational security requirement.
-if 'HSTS' in app.config and os.path.exists(app.config.HSTS):
-    print("Notice: Set HSTS to", app.config.HSTS)
+if 'HSTS' in os.environ:
+    print("Notice: Set HSTS to", app.config.env.str('HSTS', default='86400'))
     @app.middleware("response")
     async def add_hsts_headers(request, response):
         if request.scheme == 'https':
-            response.headers["Strict-Transport-Security"] = "max-age="+app.config.HSTS+"; includeSubDomains"
+            response.headers["Strict-Transport-Security"] = "max-age="+app.config.env.str('HSTS', default='86400')+"; includeSubDomains"
 
 ###############################################################################
 # Lets try autodiscovery of Endpoints (authentication APIs and site APIs)
 # Note, you must name all blueprints inside of the .py files as sub_bp,
 # so you should see something like the following in each file:
 #    sub_bp = Blueprint("auth", url_prefix="/auth")
-for source in (app.config.API_LOCATIONS):
+for source in (app.config.env.list('API_LOCATIONS', default=['./api', './external'])):
     for root, dirnames, filenames in os.walk(source):
         for filename in filenames:
             if filename.endswith('.py'):
@@ -120,16 +100,16 @@ for source in (app.config.API_LOCATIONS):
 ###############################################################################
 # Configure and connect to memcached (Variable Caching, schedules, etc.)
 # Optional, but functionality will be limited.
-# Set MEMCACHEAVAIL = False in the config file to prevent memcached usage.
 @app.listener('before_server_start')
 async def setup_memcache(app):
-    if not 'MEMCACHEAVAIL' in app.config or app.config.MEMCACHEAVAIL:
-        app.ctx.mc = aiomcache.Client(app.config.MEMCACHED_SERVER, app.config.MEMCACHED_PORT)
+    if app.config.MEMCACHEAVAIL:
+        app.ctx.mc = aiomcache.Client(app.config.env.str('MEMCACHED_SERVER', default='127.0.0.1'),
+                                      app.config.env.str('MEMCACHED_PORT', default='11211'))
         print("Notice: Memcached connection pool created.")
 
 @app.listener('after_server_stop')
 async def close_memcache(app):
-    if not 'MEMCACHEAVAIL' in app.config or app.config.MEMCACHEAVAIL:
+    if app.config.MEMCACHEAVAIL:
         await app.ctx.mc.close()
         print("Notice: Memcached connection pool closed.")
 
@@ -139,21 +119,20 @@ async def close_memcache(app):
 # Set MYSQLAVAIL = False in the config file to prevent MySQL from Loading.
 @app.listener('before_server_start')
 async def setup_db(app):
-    if not 'MYSQLAVAIL' in app.config or app.config.MYSQLAVAIL:
-        try:
-            app.ctx.pool = await aiomysql.create_pool(
-                host=app.config.DB_HOST,
-                port=app.config.DB_PORT,
-                user=app.config.DB_USER,
-                password=app.config.DB_PASS,
-                db=app.config.DB_NAME,
-                autocommit=True
-            )
-            app.config.MYSQLAVAIL = True
-            print("Notice: Database connection pool created.")
-        except:
-            app.config.MYSQLAVAIL = False
-            print("Notice: Database connection failed.")
+    try:
+        app.ctx.pool = await aiomysql.create_pool(
+            host=app.config.env.str(       'DB_HOST', default='127.0.0.1'),
+            port=app.config.env.str(       'DB_PORT', default='3306'),
+            user=app.config.env.str(       'DB_USER', default='username'),
+            password=app.config.env.str(   'DB_PASS', default='password'),
+            db=app.config.env.str(         'DB_NAME', default='dbname'),
+            autocommit=app.config.env.bool('DB_AUTOCOMMIT', default=True)
+        )
+        app.config.MYSQLAVAIL = True
+        print("Notice: Database connection pool created.")
+    except:
+        app.config.MYSQLAVAIL = False
+        print("Notice: Database connection failed.")
 
 @app.listener('after_server_stop')
 async def close_db(app):
@@ -170,7 +149,7 @@ async def close_db(app):
 class AuthVerification:
     # Verify User's Status by _ONLY_ checking session information
     async def verify(self, request):
-        if not request.ctx.session.get('user') or not request.ctx.session.get('visit') or time.time() - request.ctx.session.get('visit') > request.app.config.AUTH_VALID:
+        if not request.ctx.session.get('user') or not request.ctx.session.get('visit') or time.time() - request.ctx.session.get('visit') > request.app.config.env.int('AUTH_VALID', default=604800):
             await self.logoff(request)
             return False, None, None, {}, {}
         access = request.ctx.session.get('access')
@@ -181,7 +160,7 @@ class AuthVerification:
         return True, username, apikey, access, info
     # Verify User's Status by Checkinging Session then MySQL Database
     async def verifyapi(self, request, mykey):
-        if not request.ctx.session.get('user') or not request.ctx.session.get('visit') or time.time() - request.ctx.session.get('visit') > request.app.config.AUTH_VALID:
+        if not request.ctx.session.get('user') or not request.ctx.session.get('visit') or time.time() - request.ctx.session.get('visit') > request.app.config.env.int('AUTH_VALID', default=604800):
             async with request.app.ctx.pool.acquire() as conn:
                 async with conn.cursor(aiomysql.DictCursor) as cur:
                     query = 'SELECT user FROM sanic_info WHERE apikey=%s'

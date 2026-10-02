@@ -16,12 +16,10 @@ async def system_deauth(request):
     await request.app.ctx.auth.logoff(request)
     message = ""
     if not request.ctx.session.get('motd'):
-        message = request.app.config.AUTH_MESSAGE
+        message = request.app.config.env.str('AUTH_MESSAGE', default="")
         request.ctx.session['motd'] = True
-    page_title = ''
-    if request.app.config.AUTH_TITLE:
-        page_title = request.app.config.AUTH_TITLE
-    res = response.json({'success': True, 'sent': time.asctime(time.localtime(time.time())), 'endpoint': endpoint, 'data':{'apikey': None, 'username': None, 'access': {}, 'info': {}, 'redirect': request.app.config.REDIRECT_LOGOFF, 'logo': request.app.config.LOGON_LOGO, 'message': message, 'page_title': page_title}})
+    page_title = request.app.config.env.str('AUTH_TITLE', default="SanicApp")
+    res = response.json({'success': True, 'sent': time.asctime(time.localtime(time.time())), 'endpoint': endpoint, 'data':{'apikey': None, 'username': None, 'access': {}, 'info': {}, 'redirect': request.app.config.env.str('REDIRECT_LOGOFF', default="/index.html"), 'logo': request.app.config.env.str('LOGON_LOGO', default="/auth/logon/logo.webp"), 'message': message, 'page_title': page_title}})
     return res
 
 # Show current apikey, assumes we are logged on
@@ -43,17 +41,17 @@ async def system_info(request):
     """
     endpoint = '/auth/info'
     ok, username, apikey, access, info = await request.app.ctx.auth.verify(request)
-    redirect = request.app.config.REDIRECT_LOGON_FAILED
+    redirect = request.app.config.env.str('REDIRECT_LOGON_FAILED', default="/auth/logon/logon.html")
     if ok:
-        redirect = request.app.config.REDIRECT_LOGON_SUCCESSFUL
+        redirect = request.app.config.env.str('REDIRECT_LOGON_SUCCESSFUL', default='/index.html')
     message = ""
     if not request.ctx.session.get('motd'):
-        message = request.app.config.AUTH_MESSAGE
+        message = request.app.config.env.str('AUTH_MESSAGE', default="")
         request.ctx.session['motd'] = True
     page_title = ''
-    if request.app.config.AUTH_TITLE:
-        page_title = request.app.config.AUTH_TITLE
-    res = response.json({'success': ok, 'sent': time.asctime(time.localtime(time.time())), 'endpoint': endpoint, 'data':{'apikey': apikey, 'username': username, 'access': access, 'info': info, 'redirect': redirect, 'logo': request.app.config.LOGON_LOGO, 'message': message, 'page_title': page_title}})
+    if request.app.config.env.str('AUTH_TITLE', default="SanicApp"):
+        page_title = request.app.config.env.str('AUTH_TITLE', default="SanicApp")
+    res = response.json({'success': ok, 'sent': time.asctime(time.localtime(time.time())), 'endpoint': endpoint, 'data':{'apikey': apikey, 'username': username, 'access': access, 'info': info, 'redirect': redirect, 'logo': request.app.config.env.str('LOGON_LOGO', default="/auth/logon/logo.webp"), 'message': message, 'page_title': page_title}})
     return res
 
 # Refresh Accesses
@@ -65,19 +63,17 @@ async def system_refresh(request):
     endpoint = '/auth/refresh'
     message = ""
     if not request.ctx.session.get('motd'):
-        message = request.app.config.AUTH_MESSAGE
+        message = request.app.config.env.str('AUTH_MESSAGE', default="")
         request.ctx.session['motd'] = True
-    page_title = ''
-    if request.app.config.AUTH_TITLE:
-        page_title = request.app.config.AUTH_TITLE
+    page_title = request.app.config.env.str('AUTH_TITLE', default="SanicApp")
     ok, username, apikey, access, info = await request.app.ctx.auth.verify(request)
     if ok:
         user, apikey, info, access = await request.app.ctx.auth.logon(request, username)
-        redirect = request.app.config.REDIRECT_LOGON_SUCCESSFUL
-        res = response.json({'success': ok, 'sent': time.asctime(time.localtime(time.time())), 'endpoint': endpoint, 'data':{'apikey': apikey, 'username': username, 'access': access, 'info': info, 'redirect': redirect, 'logo': request.app.config.LOGON_LOGO, 'message': message, 'page_title': page_title}})
+        redirect = request.app.config.env.str('REDIRECT_LOGON_SUCCESSFUL', default="/index.html")
+        res = response.json({'success': ok, 'sent': time.asctime(time.localtime(time.time())), 'endpoint': endpoint, 'data':{'apikey': apikey, 'username': username, 'access': access, 'info': info, 'redirect': redirect, 'logo': request.app.config.env.str('LOGON_LOGO', default="/auth/logon/logo.webp"), 'message': message, 'page_title': page_title}})
     else:
         redirect = request.app.config.REDIRECT_LOGON_FAILED
-        res = response.json({'success': ok, 'sent': time.asctime(time.localtime(time.time())), 'endpoint': endpoint, 'data':{'apikey': apikey, 'username': username, 'access': access, 'info': info, 'redirect': redirect, 'logo': request.app.config.LOGON_LOGO, 'message': message, 'page_title': page_title}})
+        res = response.json({'success': ok, 'sent': time.asctime(time.localtime(time.time())), 'endpoint': endpoint, 'data':{'apikey': apikey, 'username': username, 'access': access, 'info': info, 'redirect': redirect, 'logo': request.app.config.env.str('LOGON_LOGO', default="/auth/logon/logo.webp"), 'message': message, 'page_title': page_title}})
     return res
 
 # Show current apikey, assumes we are logged on
@@ -88,12 +84,12 @@ async def system_rekey(request):
     """
     endpoint = '/auth/rekey'
     ok, username, apikey, access, info = await request.app.ctx.auth.verify(request)
-    redirect = request.app.config.REDIRECT_LOGON_FAILED
+    redirect = request.app.config.env.str('REDIRECT_LOGON_FAILED', default="/auth/logon/logon.html")
     if ok:
         apikey = await request.app.ctx.auth.genapikey(request, username)
         user, apikey, info, access = await request.app.ctx.auth.logon(request, username)
-        redirect = request.app.config.REDIRECT_LOGON_SUCCESSFUL
-    res = response.json({'success': ok, 'sent': time.asctime(time.localtime(time.time())), 'endpoint': endpoint, 'data':{'apikey': apikey, 'username': username, 'access': access, 'info': info, 'redirect': redirect, 'logo': request.app.config.LOGON_LOGO}})
+        redirect = request.app.config.env.str('REDIRECT_LOGON_SUCCESSFUL', default="/index.html")
+    res = response.json({'success': ok, 'sent': time.asctime(time.localtime(time.time())), 'endpoint': endpoint, 'data':{'apikey': apikey, 'username': username, 'access': access, 'info': info, 'redirect': redirect, 'logo': request.app.config.env.str('LOGON_LOGO', default="/auth/logon/logo.webp")}})
     return res
 
 # Switch Users (assuming admin access)
@@ -156,7 +152,7 @@ async def system_if_logged_on(request):
     endpoint = '/auth/redirect_if_logged_on'
     ok, username, apikey, access, info = await request.app.ctx.auth.verify(request)
     if ok:
-        redirect = request.app.config.REDIRECT_LOGON_SUCCESSFUL
+        redirect = request.app.config.env.str('REDIRECT_LOGON_SUCCESSFUL', default="/index.html")
         res = response.json({'success': ok, 'sent': time.asctime(time.localtime(time.time())), 'endpoint': endpoint, 'data':{'redirect': redirect}})
     else:
         res = response.json({'success': ok, 'sent': time.asctime(time.localtime(time.time())), 'endpoint': endpoint, 'data':{}})
@@ -173,6 +169,6 @@ async def system_if_logged_off(request):
     if ok:
         res = response.json({'success': ok, 'sent': time.asctime(time.localtime(time.time())), 'endpoint': endpoint, 'data':{}})
     else:
-        redirect = request.app.config.REDIRECT_LOGON_FAILED
+        redirect = request.app.config.env.str('REDIRECT_LOGON_FAILED', default="/auth/logon/logon.html")
         res = response.json({'success': ok, 'sent': time.asctime(time.localtime(time.time())), 'endpoint': endpoint, 'data':{'redirect': redirect}})
     return res

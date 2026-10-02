@@ -31,13 +31,13 @@ async def system_request_challenge(request):
     if ok:
         message = "Please enter the following into the challenge box provided on the website\n\n"+token+"\n\n"
         msg = EmailMessage()
-        msg['Subject'] = request.app.config.AUTH_TITLE+' Logon Request'
-        msg['From'] = request.app.config.AUTH_EMAILER
-        msg['To'] = username+request.app.config.AUTH_DOMAIN
+        msg['Subject'] =     request.app.config.env.str('AUTH_TITLE',        default='SanicApp')+' Logon Request'
+        msg['From'] =        request.app.config.env.str('AUTH_EMAILER',      default='noreply@example.com')
+        msg['To'] = username+request.app.config.env.str('AUTH_DOMAIN',       default='example.com')
         msg.set_content(message)
-        with smtplib.SMTP(request.app.config.AUTH_EMAIL_SERVER) as server:
+        with smtplib.SMTP(   request.app.config.env.str('AUTH_EMAIL_SERVER', default='localhost')) as server:
             server.send_message(msg)
     # Respond back to the user.
-    redirect = request.app.config.CHALLENGE_PAGE +'?user='+username
+    redirect = request.app.config.env.str(              'CHALLENGE_PAGE',    default='/auth/logon/challenge.html') +'?user='+username
     res = response.json({'success': ok, 'sent': time.asctime(time.localtime(time.time())), 'endpoint': endpoint, 'data':{'redirect': redirect}})
     return res
