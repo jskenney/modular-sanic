@@ -21,8 +21,6 @@ app.config.env = env
 # Enable Session Support (Default to Memcached interface),
 # use in-memory model if Memcached is unavailable.
 try:
-    print('MEMCACHED_HOST:',app.config.env.str('MEMCACHED_HOST', default='127.0.0.1'))
-    print('MEMCACHED_PORT:',app.config.env.str('MEMCACHED_PORT', default='11211'))
     test_client = pymemcache.client.base.Client((app.config.env.str('MEMCACHED_HOST', default='127.0.0.1'),
                                                  app.config.env.str('MEMCACHED_PORT', default='11211')))
     test = test_client.get('user')
@@ -32,8 +30,9 @@ try:
     Session(app, interface=MemcacheSessionInterface(client))
     print("Notice: Using Memcached Session Handling")
     app.config.MEMCACHEAVAIL = True
-except:
+except Exception as e:
     Session(app)
+    print(f"Notice: Memcached connection failed: {type(e).__name__} | Message: {e}")
     print("Notice: Using InMemory Session Handling")
     app.config.MEMCACHEAVAIL = False
 
@@ -122,11 +121,6 @@ async def close_memcache(app):
 @app.listener('before_server_start')
 async def setup_db(app):
     try:
-        print('DB_HOST:',app.config.env.str('DB_HOST', default='127.0.0.1'))
-        print('DB_PORT:',app.config.env.str('DB_PORT', default='3306'))
-        print('DB_USER:',app.config.env.str('DB_USER', default='username'))
-        print('DB_PASS:',app.config.env.str('DB_PASS', default='password'))
-        print('DB_NAME:',app.config.env.str('DB_NAME', default='dbname'))
         app.ctx.pool = await aiomysql.create_pool(
             host=app.config.env.str(       'DB_HOST', default='127.0.0.1'),
             port=app.config.env.int(       'DB_PORT', default=3306),
@@ -139,8 +133,7 @@ async def setup_db(app):
         print("Notice: Database connection pool created.")
     except Exception as e:
         app.config.MYSQLAVAIL = False
-        print(f"Error Type: {type(e).__name__} | Message: {e}")
-        print("Notice: Database connection failed.")
+        print(f"Notice: Database connection failed: {type(e).__name__} | Message: {e}")
 
 @app.listener('after_server_stop')
 async def close_db(app):
