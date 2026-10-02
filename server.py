@@ -120,6 +120,11 @@ async def close_memcache(app):
 @app.listener('before_server_start')
 async def setup_db(app):
     try:
+        print('DB_HOST:',app.config.env.str('DB_HOST', default='127.0.0.1'))
+        print('DB_PORT:',app.config.env.str('DB_PORT', default='3306'))
+        print('DB_USER:',app.config.env.str('DB_USER', default='username'))
+        print('DB_PASS:',app.config.env.str('DB_PASS', default='password'))
+        print('DB_NAME:',app.config.env.str('DB_NAME', default='dbname'))
         app.ctx.pool = await aiomysql.create_pool(
             host=app.config.env.str(       'DB_HOST', default='127.0.0.1'),
             port=app.config.env.str(       'DB_PORT', default='3306'),
