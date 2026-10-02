@@ -129,7 +129,7 @@ async def setup_db(app):
         print('DB_NAME:',app.config.env.str('DB_NAME', default='dbname'))
         app.ctx.pool = await aiomysql.create_pool(
             host=app.config.env.str(       'DB_HOST', default='127.0.0.1'),
-            port=app.config.env.str(       'DB_PORT', default='3306'),
+            port=app.config.env.int(       'DB_PORT', default=3306),
             user=app.config.env.str(       'DB_USER', default='username'),
             password=app.config.env.str(   'DB_PASS', default='password'),
             db=app.config.env.str(         'DB_NAME', default='dbname'),
