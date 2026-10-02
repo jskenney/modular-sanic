@@ -67,8 +67,8 @@ if os.path.exists(app.config.env.str('PAGE_500', default='./html/500.html')):
 ###############################################################################
 # Block documentation generation
 if not app.config.env.bool('DOCUMENTATION', default=True):
-    print("Notice: Documentation is unavailable.")
     app.config.OAS=False
+    print("Notice: Documentation is unavailable.")
 
 ###############################################################################
 # To support HSTS, a common organizational security requirement.
@@ -99,8 +99,7 @@ for source in (app.config.env.list('API_LOCATIONS', default=['./api', './externa
                         print("Notice: Loaded blueprint from", filename)
 
 ###############################################################################
-# Configure and connect to memcached (Variable Caching, schedules, etc.)
-# Optional, but functionality will be limited.
+# Configure and connect to memcached.
 @app.listener('before_server_start')
 async def setup_memcache(app):
     if app.config.MEMCACHEAVAIL:
@@ -117,7 +116,6 @@ async def close_memcache(app):
 ###############################################################################
 # Configure and connect to the MySQL database, this is optional but not having
 # MySQL available will limit functionality, including authentication options.
-# Set MYSQLAVAIL = False in the config file to prevent MySQL from Loading.
 @app.listener('before_server_start')
 async def setup_db(app):
     try:
