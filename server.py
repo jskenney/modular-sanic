@@ -21,6 +21,8 @@ app.config.env = env
 # Enable Session Support (Default to Memcached interface),
 # use in-memory model if Memcached is unavailable.
 try:
+    print('MEMCACHED_SERVER:',app.config.env.str('MEMCACHED_SERVER:', default='127.0.0.1'))
+    print('MEMCACHED_PORT:',app.config.env.str('MEMCACHED_PORT', default='11211'))
     test_client = pymemcache.client.base.Client((app.config.env.str('MEMCACHED_SERVER', default='127.0.0.1'),
                                                  app.config.env.str('MEMCACHED_PORT', default='11211')))
     test = test_client.get('user')
