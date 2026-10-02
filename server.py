@@ -137,8 +137,9 @@ async def setup_db(app):
         )
         app.config.MYSQLAVAIL = True
         print("Notice: Database connection pool created.")
-    except:
+    except Exception as e:
         app.config.MYSQLAVAIL = False
+        print(f"Error Type: {type(e).__name__} | Message: {e}")
         print("Notice: Database connection failed.")
 
 @app.listener('after_server_stop')
