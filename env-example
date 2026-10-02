@@ -13,7 +13,7 @@ DB_NAME=dbname
 DB_PORT=3306
 
 # Memcached Connection Settings
-MEMCACHED_SERVER=127.0.0.1
+MEMCACHED_HOST=127.0.0.1
 MEMCACHED_PORT=11211
 
 # The following values are located relative to server.py's filesystem location

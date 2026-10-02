@@ -21,13 +21,13 @@ app.config.env = env
 # Enable Session Support (Default to Memcached interface),
 # use in-memory model if Memcached is unavailable.
 try:
-    print('MEMCACHED_SERVER:',app.config.env.str('MEMCACHED_SERVER', default='127.0.0.1'))
+    print('MEMCACHED_HOST:',app.config.env.str('MEMCACHED_HOST', default='127.0.0.1'))
     print('MEMCACHED_PORT:',app.config.env.str('MEMCACHED_PORT', default='11211'))
-    test_client = pymemcache.client.base.Client((app.config.env.str('MEMCACHED_SERVER', default='127.0.0.1'),
+    test_client = pymemcache.client.base.Client((app.config.env.str('MEMCACHED_HOST', default='127.0.0.1'),
                                                  app.config.env.str('MEMCACHED_PORT', default='11211')))
     test = test_client.get('user')
     test_client.close()
-    client = aiomcache.Client(app.config.env.str('MEMCACHED_SERVER', default='127.0.0.1'),
+    client = aiomcache.Client(app.config.env.str('MEMCACHED_HOST', default='127.0.0.1'),
                               app.config.env.str('MEMCACHED_PORT', default='11211'))
     Session(app, interface=MemcacheSessionInterface(client))
     print("Notice: Using Memcached Session Handling")
@@ -105,7 +105,7 @@ for source in (app.config.env.list('API_LOCATIONS', default=['./api', './externa
 @app.listener('before_server_start')
 async def setup_memcache(app):
     if app.config.MEMCACHEAVAIL:
-        app.ctx.mc = aiomcache.Client(app.config.env.str('MEMCACHED_SERVER', default='127.0.0.1'),
+        app.ctx.mc = aiomcache.Client(app.config.env.str('MEMCACHED_HOST', default='127.0.0.1'),
                                       app.config.env.str('MEMCACHED_PORT', default='11211'))
         print("Notice: Memcached connection pool created.")
 
