@@ -38,6 +38,6 @@ async def system_request_challenge(request):
         with smtplib.SMTP(   request.app.config.env.str('AUTH_EMAIL_SERVER', default='localhost')) as server:
             server.send_message(msg)
     # Respond back to the user.
-    redirect = request.app.config.env.str(              'CHALLENGE_PAGE',    default='/auth/logon/challenge.html') +'?user='+username
+    redirect = request.app.config.env.str(              'CHALLENGE_PAGE',    default='/challenge.html') +'?user='+username
     res = response.json({'success': ok, 'sent': time.asctime(time.localtime(time.time())), 'endpoint': endpoint, 'data':{'redirect': redirect}})
     return res
