@@ -25,7 +25,7 @@ async def system_challenge(request):
                 query = 'UPDATE sanic_challenge SET attempts = attempts + 1 WHERE user=%s'
                 values = (user, )
                 await cur.execute(query, values)
-                res = response.json({'success': False, 'sent': time.asctime(time.localtime(time.time())), 'endpoint':endpoint, 'data':{'username': None, 'apikey': '', 'access': {}, 'info': {}, 'redirect': request.app.config.env.str('REDIRECT_LOGON_FAILED', default='/logon.html')}})
+                res = response.json({'success': False, 'sent': time.asctime(time.localtime(time.time())), 'endpoint':endpoint, 'data':{'username': None, 'apikey': '', 'access': {}, 'info': {}, 'redirect': request.app.config.env.str('REDIRECT_LOGON_FAILED', default='/logon/logon.html')}})
                 return res
             query = 'DELETE FROM sanic_challenge WHERE user=%s'
             values = (user,)

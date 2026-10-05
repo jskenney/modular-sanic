@@ -41,7 +41,7 @@ async def system_info(request):
     """
     endpoint = '/auth/info'
     ok, username, apikey, access, info = await request.app.ctx.auth.verify(request)
-    redirect = request.app.config.env.str('REDIRECT_LOGON_FAILED', default="/logon.html")
+    redirect = request.app.config.env.str('REDIRECT_LOGON_FAILED', default="/logon/logon.html")
     if ok:
         redirect = request.app.config.env.str('REDIRECT_LOGON_SUCCESSFUL', default='/index.html')
     message = ""
@@ -84,7 +84,7 @@ async def system_rekey(request):
     """
     endpoint = '/auth/rekey'
     ok, username, apikey, access, info = await request.app.ctx.auth.verify(request)
-    redirect = request.app.config.env.str('REDIRECT_LOGON_FAILED', default="/logon.html")
+    redirect = request.app.config.env.str('REDIRECT_LOGON_FAILED', default="/logon/logon.html")
     if ok:
         apikey = await request.app.ctx.auth.genapikey(request, username)
         user, apikey, info, access = await request.app.ctx.auth.logon(request, username)
@@ -169,6 +169,6 @@ async def system_if_logged_off(request):
     if ok:
         res = response.json({'success': ok, 'sent': time.asctime(time.localtime(time.time())), 'endpoint': endpoint, 'data':{}})
     else:
-        redirect = request.app.config.env.str('REDIRECT_LOGON_FAILED', default="/logon.html")
+        redirect = request.app.config.env.str('REDIRECT_LOGON_FAILED', default="/logon/logon.html")
         res = response.json({'success': ok, 'sent': time.asctime(time.localtime(time.time())), 'endpoint': endpoint, 'data':{'redirect': redirect}})
     return res

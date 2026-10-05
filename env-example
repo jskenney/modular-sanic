@@ -25,10 +25,10 @@ PAGE_404=./html/404.html                      # Location of 404 Error (doc not f
 # The following values are located depending on system configurations and are
 # NOT relative to the location of server.py.
 REDIRECT_LOGON_SUCCESSFUL=/index.html         # Redirect after successful logon
-REDIRECT_LOGON_FAILED=/logon.html             # Redirect after unsuccessful logon
+REDIRECT_LOGON_FAILED=/logon/logon.html       # Redirect after unsuccessful logon
 REDIRECT_LOGOFF=/index.html                   # Redirect after logoff
-CHALLENGE_PAGE=/challenge.html                # Page for authentication challenges
-LOGON_LOGO=/logo.webp                         # Large image for logon pages
+CHALLENGE_PAGE=/logon/challenge.html          # Page for authentication challenges
+LOGON_LOGO=/logon/logo.webp                   # Large image for logon pages
 
 # Authentication Settings
 AUTH_VALID=604800                             # A Session is valid for 7 days        *
