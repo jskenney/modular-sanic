@@ -2,24 +2,21 @@
 
 # Sample Start Script
 
-if [ ! -d venv ]; then
+if [ ! -d /tmp/demo-venv ]; then
 
-  # Create and source a Python 3.11 virtual environment
-  python3.11 -B -m venv venv
-  source ./venv/bin/activate
+  # Create and source a Python virtual environment
+  python3 -B -m venv /tmp/demo-venv
+  source /tmp/demo-venv/bin/activate
 
   # Install required packages
   pip install --upgrade pip
   pip install --upgrade setuptools
-  pip install sanic sanic-ext aiomysql python-pam six aiomcache cryptography mysqlclient pymemcache environs pydantic
-
-  # There is a bug in sanic-session, so we need python 3.11 and the repo below until it is fixed
-  python -B -m pip install sanic_session@git+https://github.com/jskenney/sanic-session
+  pip install -r requirements.txt --no-build-isolation
 
 else
 
-  # Source the Python 3.11 virtual environment
-  source ./venv/bin/activate
+  # Source the Python virtual environment
+  source /tmp/demo-venv/bin/activate
 
   # Start Modular Sanic
   SANIC_CONFIG_FILE=config.py python3 -B $(which sanic) server \
