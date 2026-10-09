@@ -60,7 +60,7 @@ async def system_apifile(request):
     if files_info[0]['size'] > 10000:
         return response.json({'success': False, 'sent': time.asctime(time.localtime(time.time())), 'endpoint': endpoint, "error": "The file uploaded was too large and was rejected.", 'data':{}})
     uploaded_file = str(request.files.get('files[]'))
-    if not uploaded_file:
+    if uploaded_file == 'None':
         return response.json({'success': False, 'sent': time.asctime(time.localtime(time.time())), 'endpoint': endpoint, "error": "No files were sent to the server.", 'data':{}})
     uuid_pattern_strict = r'\b[0-9a-fA-F]{8}-' \
                       r'[0-9a-fA-F]{4}-' \
@@ -77,9 +77,9 @@ async def system_apifile(request):
             query = 'SELECT user FROM sanic_info WHERE apikey=%s'
             values = (uuids, )
             await cur.execute(query, values)
-    info = await cur.fetchall()
-    if len(info) == 0:
-        return response.json({'success': False, 'sent': time.asctime(time.localtime(time.time())), 'endpoint': endpoint, "error": "API key that was sent was invalid.", 'data':{}})
+            info = await cur.fetchall()
+            if len(info) == 0:
+                return response.json({'success': False, 'sent': time.asctime(time.localtime(time.time())), 'endpoint': endpoint, "error": "API key that was sent was invalid.", 'data':{}})
     user, apikey, info, access = await request.app.ctx.auth.logon(request, info[0]['user'])
     res = response.json({'success': True, 'sent': time.asctime(time.localtime(time.time())), 'endpoint': endpoint, 'data':{'username': user, 'apikey': apikey, 'access': access, 'info': info, 'redirect': request.app.config.env.str('REDIRECT_LOGON_SUCCESSFUL', default='/index.html')}})
     return res

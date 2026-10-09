@@ -27,11 +27,11 @@ try:
     test_client.close()
     client = aiomcache.Client(app.config.env.str('MEMCACHED_HOST', default='127.0.0.1'),
                               app.config.env.str('MEMCACHED_PORT', default='11211'))
-    Session(app, interface=MemcacheSessionInterface(client))
+    Session(app, interface=MemcacheSessionInterface(client, samesite="Lax", secure=True))
     print("Notice: Using Memcached Session Handling")
     app.config.MEMCACHEAVAIL = True
 except Exception as e:
-    Session(app)
+    Session(app, interface=InMemorySessionInterface(samesite="Lax", secure=True))
     print(f"Notice: Memcached connection failed: {type(e).__name__} | Message: {e}")
     print("Notice: Using InMemory Session Handling")
     app.config.MEMCACHEAVAIL = False
@@ -42,7 +42,7 @@ except Exception as e:
 app.static("/",
            app.config.env.str('HTML', default='./html/'),
            index="index.html",
-           directory_view=app.config.env.bool('SHOW_SITE_CONTENTS', default=True))
+           directory_view=app.config.env.bool('SHOW_SITE_CONTENTS', default=False))
 app.static("/favicon.ico",
            app.config.env.str('FAVICON', default='./html/favicon.ico'),
            name='favicon')
@@ -60,13 +60,10 @@ if os.path.exists(app.config.env.str('PAGE_500', default='./html/500.html')):
     @app.exception(ServerError)
     async def handle_server_errors(request, exception):
         return html(open(app.config.env.str('PAGE_500', default='./html/500.html')).read(), status=500)
-    @app.exception(Exception)
-    async def handle_all_server_errors(request, exception):
-        return html(open(app.config.env.str('PAGE_500', default='./html/500.html')).read(), status=500)
 
 ###############################################################################
 # Block documentation generation
-if not app.config.env.bool('DOCUMENTATION', default=True):
+if not app.config.env.bool('DOCUMENTATION', default=False):
     app.config.OAS=False
     print("Notice: Documentation is unavailable.")
 
@@ -179,20 +176,10 @@ class AuthVerification:
             return True, username, apikey, access, info
     # Remove Session Variables effectively logging off the user
     async def logoff(self, request):
-        if request.ctx.session.get('apikey'):
-            del(request.ctx.session['apikey'])
-        if request.ctx.session.get('access'):
-            del(request.ctx.session['access'])
-        if request.ctx.session.get('info'):
-            del(request.ctx.session['info'])
-        if request.ctx.session.get('user'):
-            del(request.ctx.session['user'])
-        if request.ctx.session.get('motd'):
-            del(request.ctx.session['motd'])
-        if request.ctx.session.get('visit'):
-            del(request.ctx.session['visit'])
-        if request.ctx.session.get('original_user'):
-            del(request.ctx.session['original_user'])
+        destroy = ['apikey', 'access', 'info', 'user', 'motd', 'visit', 'original_user']
+        for item in destroy:
+            if request.ctx.session.get(item) is not None:
+                del(request.ctx.session[item])
     # Generate an API key, requires MySQL
     async def genapikey(self, request, user):
         if not app.config.MYSQLAVAIL:
@@ -236,7 +223,7 @@ class AuthVerification:
     # Show current user's access (either via session or MySQL)
     async def access_show(self, request, user):
         if not app.config.MYSQLAVAIL:
-            username, apikey, access, info = self.verify(request)
+            ok, username, apikey, access, info = await self.verify(request)
             return user, apikey, info, access
         info = {}
         access = {}

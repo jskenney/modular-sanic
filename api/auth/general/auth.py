@@ -72,7 +72,7 @@ async def system_refresh(request):
         redirect = request.app.config.env.str('REDIRECT_LOGON_SUCCESSFUL', default="/index.html")
         res = response.json({'success': ok, 'sent': time.asctime(time.localtime(time.time())), 'endpoint': endpoint, 'data':{'apikey': apikey, 'username': username, 'access': access, 'info': info, 'redirect': redirect, 'logo': request.app.config.env.str('LOGON_LOGO', default="/logo.webp"), 'message': message, 'page_title': page_title}})
     else:
-        redirect = request.app.config.REDIRECT_LOGON_FAILED
+        redirect = request.app.config.env.str('REDIRECT_LOGON_FAILED', default="/logon/logon.html")
         res = response.json({'success': ok, 'sent': time.asctime(time.localtime(time.time())), 'endpoint': endpoint, 'data':{'apikey': apikey, 'username': username, 'access': access, 'info': info, 'redirect': redirect, 'logo': request.app.config.env.str('LOGON_LOGO', default="/logo.webp"), 'message': message, 'page_title': page_title}})
     return res
 
