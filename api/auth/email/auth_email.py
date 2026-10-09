@@ -1,7 +1,7 @@
 from sanic import Blueprint, response
 from sanic_ext import openapi
 import asyncio, aiomysql
-import time, random
+import time, secrets
 import smtplib
 from email.message import EmailMessage
 
@@ -16,7 +16,7 @@ async def system_request_challenge(request):
     data = request.json
     username = data['username']
     # Generate a Token (7 digits)
-    token = ''.join(str(random.randint(0, 9)) for _ in range(7))
+    token = str(secrets.randbelow(10**7))
     # Add the token to the database
     query = 'INSERT INTO sanic_challenge (user, expect) VALUES (%s, %s) ON DUPLICATE KEY UPDATE expect=%s, attempts=0, sent=NOW()'
     values = (username, token, token, )
