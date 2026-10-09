@@ -42,7 +42,7 @@ read -p "Enter the database name that will be used for sanic: " mydb
 # Set Admin User credentials - changeme
 sudo mysql -u root mysql -e "CREATE USER '$myuser'@'%' IDENTIFIED BY '$mypass';"
 sudo mysql -u root mysql -e "CREATE DATABASE $mydb;"
-sudo mysql -u root mysql -e "GRANT ALL PRIVILEGES ON $mydb.* TO '$myuser'@'%' WITH GRANT OPTION;"
+sudo mysql -u root mysql -e "GRANT ALL PRIVILEGES ON $mydb.* TO '$myuser'@'%';"
 
 # Load empty sanic tables
 sudo mysql -u root $mydb < auth_tables.sql
