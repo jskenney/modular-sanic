@@ -176,10 +176,7 @@ class AuthVerification:
             return True, username, apikey, access, info
     # Remove Session Variables effectively logging off the user
     async def logoff(self, request):
-        destroy = ['apikey', 'access', 'info', 'user', 'motd', 'visit', 'original_user']
-        for item in destroy:
-            if request.ctx.session.get(item) is not None:
-                del(request.ctx.session[item])
+        request.ctx.session.clear()
     # Generate an API key, requires MySQL
     async def genapikey(self, request, user):
         if not app.config.MYSQLAVAIL:
