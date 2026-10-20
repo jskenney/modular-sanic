@@ -5,7 +5,6 @@ python-pam
 six
 aiomcache
 cryptography
-mysqlclient
 pymemcache
 orjson
 ujson
