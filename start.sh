@@ -12,8 +12,7 @@ if [ ! -d /tmp/demo-venv ]; then
 
   # Install required packages
   pip install --upgrade pip
-  pip install --upgrade setuptools
-  pip install -r requirements.txt --no-build-isolation
+  pip install -r requirements.txt
 
 else
 
