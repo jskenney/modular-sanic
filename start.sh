@@ -42,7 +42,7 @@ else
     SANIC_CONFIG_FILE=config.py python3 -B $(which sanic) server \
         --debug \
         --reload -R . \
-        --host=127.0.0.1
+        --host=127.0.0.1 --port=${PORT:-8000}
 
   fi
 
