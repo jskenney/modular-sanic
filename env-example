@@ -8,7 +8,8 @@ API_LOCATIONS=api/auth/general,api/auth/switchuser,api/auth/pam,api/auth/apikey,
 #CONTENT_SECURITY_POLICY=default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'
 #REFERRER_POLICY=strict-origin-when-cross-origin
 
-# Reverse proxy settings (read by Sanic itself).  Behind a proxy such as nginx
+# Reverse proxy settings (read by Sanic itself; any SANIC_ setting here is
+# passed on to Sanic at startup).  Behind a proxy such as nginx
 # or caddy, set one of these so client addresses (used for rate limiting) and
 # HTTPS (used for HSTS) are taken from the proxy's forwarded headers.
 #SANIC_PROXIES_COUNT=1

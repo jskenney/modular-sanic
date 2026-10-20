@@ -10,11 +10,21 @@ from sanic_session import Session, MemcacheSessionInterface, InMemorySessionInte
 import aiomysql, aiomcache, pymemcache
 import os, importlib.util, time, uuid, sys, environs, hashlib, re, base64
 import pymysql
+from dotenv import dotenv_values
 
 ###############################################################################
 # Use environmental variables and the .env file for configuration settings
 env = environs.Env()
-env.read_env()
+env_path = env.read_env(return_path=True)
+
+# Sanic reads its own settings (SANIC_PROXIES_COUNT, SANIC_REAL_IP_HEADER, ...)
+# from the process environment, but environs keeps .env values to itself, so
+# pass the SANIC_ ones on before the app is created.  A value already set in
+# the environment wins over .env, matching environs.
+if env_path:
+    for key, value in dotenv_values(env_path).items():
+        if key.startswith('SANIC_') and value is not None:
+            os.environ.setdefault(key, value)
 
 ###############################################################################
 # Create Sanic Application
