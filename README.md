@@ -30,7 +30,7 @@ or run it behind a reverse proxy that terminates TLS.  `setup/install-443-redire
 
 ## Running behind a reverse proxy
 
-Behind a proxy such as nginx or caddy, every request reaches Sanic from the proxy's address over plain HTTP.  Tell Sanic to trust the proxy's forwarded headers, otherwise all clients share one address for the logon rate limits (so a few failed logons lock everyone out) and HTTPS is not detected (so the HSTS header is never sent).  Set one of these (in the environment or `.env`; Sanic reads them itself):
+Behind a proxy such as nginx or caddy, every request reaches Sanic from the proxy's address over plain HTTP.  Tell Sanic to trust the proxy's forwarded headers, otherwise all clients share one address for the logon rate limits (so a few failed logons lock everyone out) and HTTPS is not detected (so the HSTS header is never sent).  Set one of these in the environment or in `.env` (every `SANIC_` setting in `.env` is passed on to Sanic when the server starts; a value already set in the environment wins):
 
 | Variable | Use when |
 |---|---|
