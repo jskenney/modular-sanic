@@ -10,6 +10,9 @@ async def system_challenge(request):
     """
     Verify a authentication challenge request.
     """
+    unavailable = request.app.ctx.auth.db_unavailable(request)
+    if unavailable:
+        return unavailable
     data = request.json
     user = data['username']
     token = str(data['challenge'])
@@ -34,6 +37,7 @@ async def system_challenge(request):
             query = 'DELETE FROM sanic_challenge WHERE user=%s'
             values = (user,)
             await cur.execute(query, values)
-            user, apikey, info, access = await request.app.ctx.auth.logon(request, user)
-            res = request.app.ctx.reply(request, True, {'username': user, 'apikey': apikey, 'access': access, 'info': info, 'redirect': request.app.config.env.str('REDIRECT_LOGON_SUCCESSFUL', default='/index.html')})
-            return res
+    # Log on after the connection is returned, logon() uses its own connection
+    user, apikey, info, access = await request.app.ctx.auth.logon(request, user)
+    res = request.app.ctx.reply(request, True, {'username': user, 'apikey': apikey, 'access': access, 'info': info, 'redirect': request.app.config.env.str('REDIRECT_LOGON_SUCCESSFUL', default='/index.html')})
+    return res

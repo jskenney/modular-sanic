@@ -208,8 +208,8 @@ code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberat
             <dd>Show User and Site Info <span class="endpoint-note">(used on auth websites)</span></dd>
           </div>
           <div class="endpoint-row">
-            <dt><a class="endpoint-path" href="/auth/rekey"><code>/auth/rekey</code></a></dt>
-            <dd>Reset API Key</dd>
+            <dt><code class="endpoint-path">/auth/rekey</code> <span class="endpoint-note">(POST)</span></dt>
+            <dd>Reset API Key <span class="endpoint-note">(use Generate new API key below)</span></dd>
           </div>
           <div class="endpoint-row endpoint-group-start">
             <dt><a class="endpoint-path" href="/auth/redirect_if_logged_on"><code>/auth/redirect_if_logged_on</code></a></dt>
@@ -230,8 +230,9 @@ code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberat
         <div class="debug-body">
           <section class="debug-section" aria-labelledby="api-key-title">
             <h3 class="debug-title" id="api-key-title">API Key</h3>
-            <p class="debug-description" id="api-key-description">Provided for debugging and inserted automatically into the access examples below.</p>
+            <p class="debug-description" id="api-key-description">Keys are stored hashed, so a key is only shown once, when it is generated. Generating a new key replaces the old one.</p>
             <code class="code-panel" id="akey" aria-labelledby="api-key-title" aria-describedby="api-key-description">Pending server response…</code>
+            <p><button class="button button-primary" id="rekey-button" type="button">Generate new API key</button></p>
             <p class="notice">Note: API keys are unavailable if MySQL database is not used.</p>
           </section>
           <section class="debug-section" aria-labelledby="user-info-title">
@@ -246,7 +247,7 @@ code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberat
       <section class="card" aria-labelledby="access-title">
         <div class="card-heading">
           <h2 class="card-title" id="access-title">Access Endpoints</h2>
-          <p class="card-description">Endpoints below require an API key. The key is ignored if a valid web session is found.</p>
+          <p class="card-description">Endpoints below require an API key, sent as an <code>Authorization: Bearer</code> header or in place of &lt;apikey&gt;. Use <code>session</code> or <code>-</code> as &lt;apikey&gt; to use your web session instead. Add and remove must be sent as POST.</p>
         </div>
         <dl class="endpoint-list access-list">
           <div class="endpoint-row">
@@ -275,6 +276,7 @@ code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberat
   const debugSection = document.getElementById('debugging');
   const refreshButton = document.getElementById('refresh-button');
   const requestStatus = document.getElementById('request-status');
+  const rekeyButton = document.getElementById('rekey-button');
   const examples = document.querySelectorAll('[data-api-template]');
   let loading = false;
 
@@ -339,7 +341,7 @@ code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberat
         keyOutput.textContent = apiKey;
         updateExamples(apiKey);
       } else {
-        keyOutput.textContent = 'No API key was returned by the server.';
+        keyOutput.textContent = 'Keys are only shown when generated. Use Generate new API key to create one.';
       }
       requestStatus.textContent = 'Server response loaded.';
       refreshButton.textContent = 'Refresh';
@@ -361,6 +363,28 @@ code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberat
       }
     }
   }
+
+  // The new key is returned only by this request, so show it right away.
+  rekeyButton.addEventListener('click', async () => {
+    rekeyButton.disabled = true;
+    requestStatus.classList.remove('is-error');
+    try {
+      const response = await fetch('/auth/rekey', { method: 'POST' });
+      const result = await response.json();
+      const apiKey = result && result.data && result.data.apikey ? String(result.data.apikey) : '';
+      if (!response.ok || !apiKey) throw new Error(result.error || `HTTP error! status: ${response.status}`);
+      keyOutput.textContent = apiKey;
+      updateExamples(apiKey);
+      requestStatus.textContent = 'New API key generated. Copy it now, it will not be shown again.';
+    } catch (error) {
+      console.error('Error generating API key:', error);
+      requestStatus.classList.add('is-error');
+      requestStatus.textContent = 'Could not generate a new API key. ' +
+        (error instanceof Error ? error.message : 'The request failed.');
+    } finally {
+      rekeyButton.disabled = false;
+    }
+  });
 
   refreshButton.hidden = false;
   refreshButton.addEventListener('click', loadUserInfo);

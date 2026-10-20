@@ -7,7 +7,7 @@ sub_bp = Blueprint("auth", url_prefix="/")
 
 ###############################################################################
 # Deauthenticate / Logoff (remove cookie and any database references)
-@sub_bp.route("/auth/deauth", methods=['GET'])
+@sub_bp.route("/auth/deauth", methods=['POST'])
 async def system_deauth(request):
     """
     Log off and invalidate current session.
@@ -73,10 +73,11 @@ async def system_refresh(request):
     return res
 
 # Show current apikey, assumes we are logged on
-@sub_bp.route("/auth/rekey", methods=['GET'])
+@sub_bp.route("/auth/rekey", methods=['POST'])
 async def system_rekey(request):
     """
-    Generate new API Key and provide updated API key and user information
+    Generate new API Key and provide updated API key and user information.
+    This is the only time the new key is shown.
     """
     ok, username, apikey, access, info = await request.app.ctx.auth.verify(request)
     redirect = request.app.config.env.str('REDIRECT_LOGON_FAILED', default="/logon/logon.html")
@@ -84,8 +85,12 @@ async def system_rekey(request):
     if ok and request.ctx.session.get('original_user'):
         return request.app.ctx.reply(request, False, {'apikey': apikey, 'username': username, 'access': access, 'info': info, 'redirect': request.app.config.env.str('REDIRECT_LOGON_SUCCESSFUL', default="/index.html"), 'logo': request.app.config.env.str('LOGON_LOGO', default="/logon/logo.webp")}, status=403, error="The API key cannot be changed while switched to another user.")
     if ok:
-        apikey = await request.app.ctx.auth.genapikey(request, username)
+        unavailable = request.app.ctx.auth.db_unavailable(request)
+        if unavailable:
+            return unavailable
+        newkey = await request.app.ctx.auth.genapikey(request, username)
         user, apikey, info, access = await request.app.ctx.auth.logon(request, username)
+        apikey = newkey
         redirect = request.app.config.env.str('REDIRECT_LOGON_SUCCESSFUL', default="/index.html")
     res = request.app.ctx.reply(request, ok, {'apikey': apikey, 'username': username, 'access': access, 'info': info, 'redirect': redirect, 'logo': request.app.config.env.str('LOGON_LOGO', default="/logon/logo.webp")}, status=200 if ok else 401)
     return res
@@ -105,7 +110,7 @@ async def system_access_list(request, apikey, user):
     return res
 
 # Switch Users (assuming admin access)
-@sub_bp.route("/auth/<apikey>/access/add/<user>/<access>/<value>", methods=['GET'])
+@sub_bp.route("/auth/<apikey>/access/add/<user>/<access>/<value>", methods=['POST'])
 async def system_access_add(request, apikey, user, access, value):
     """
     Add specific access key/value pairs for a user, must be a user with admin/permissions access.
@@ -114,15 +119,21 @@ async def system_access_add(request, apikey, user, access, value):
     nvalue = value
     ok, username, apikey, access, info = await request.app.ctx.auth.verifyapi(request, apikey)
     if 'admin' in access and 'permissions' in access['admin']:
-        await request.app.ctx.auth.access_add(request, user, naccess, nvalue)
+        unavailable = request.app.ctx.auth.db_unavailable(request)
+        if unavailable:
+            return unavailable
+        changed = await request.app.ctx.auth.access_add(request, user, naccess, nvalue)
         user, apikey, info, access = await request.app.ctx.auth.access_show(request, user)
-        res = request.app.ctx.reply(request, True, {'username': user, 'access': access})
+        if changed:
+            res = request.app.ctx.reply(request, True, {'username': user, 'access': access})
+        else:
+            res = request.app.ctx.reply(request, False, {'username': user, 'access': access}, status=400, error="The access could not be added (unknown user, or the access is already present).")
     else:
         res = request.app.ctx.reply(request, False, {'username': username, 'access': {}}, status=403 if ok else 401)
     return res
 
 # Switch Users (assuming admin access)
-@sub_bp.route("/auth/<apikey>/access/remove/<user>/<access>/<value>", methods=['GET'])
+@sub_bp.route("/auth/<apikey>/access/remove/<user>/<access>/<value>", methods=['POST'])
 async def system_access_remove(request, apikey, user, access, value):
     """
     Remove a specific access key/value pair for a user, must be a user with admin/permissions access.
@@ -131,9 +142,15 @@ async def system_access_remove(request, apikey, user, access, value):
     nvalue = value
     ok, username, apikey, access, info = await request.app.ctx.auth.verifyapi(request, apikey)
     if 'admin' in access and 'permissions' in access['admin']:
-        await request.app.ctx.auth.access_del(request, user, naccess, nvalue)
+        unavailable = request.app.ctx.auth.db_unavailable(request)
+        if unavailable:
+            return unavailable
+        changed = await request.app.ctx.auth.access_del(request, user, naccess, nvalue)
         user, apikey, info, access = await request.app.ctx.auth.access_show(request, user)
-        res = request.app.ctx.reply(request, True, {'username': user, 'access': access})
+        if changed:
+            res = request.app.ctx.reply(request, True, {'username': user, 'access': access})
+        else:
+            res = request.app.ctx.reply(request, False, {'username': user, 'access': access}, status=400, error="The access could not be removed (it was not present).")
     else:
         res = request.app.ctx.reply(request, False, {'username': username, 'access': {}}, status=403 if ok else 401)
     return res

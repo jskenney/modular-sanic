@@ -7,6 +7,8 @@ CREATE TABLE IF NOT EXISTS `sanic_info` (
   `fullname` VARCHAR(250) NULL,
   `department` VARCHAR(250) NULL,
   `apikey` VARCHAR(99) NULL,
+  `apikey_created` DATETIME NULL,
+  `apikey_expires` DATETIME NULL,
   CONSTRAINT PK_sanic_info PRIMARY KEY (user)
 );
 

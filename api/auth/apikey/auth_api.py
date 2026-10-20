@@ -13,6 +13,9 @@ async def system_apikey(request):
     """
     Authenticate a user using their API key.
     """
+    unavailable = request.app.ctx.auth.db_unavailable(request)
+    if unavailable:
+        return unavailable
     data = request.json
     user = data['username']
     apikey = data['apikey']
@@ -21,19 +24,20 @@ async def system_apikey(request):
     await request.app.ctx.auth.logoff(request)
     async with request.app.ctx.pool.acquire() as conn:
         async with conn.cursor(aiomysql.DictCursor) as cur:
-            query = 'SELECT * FROM sanic_info WHERE user = %s AND apikey = %s'
-            values = (user, apikey, )
+            query = 'SELECT user FROM sanic_info WHERE user = %s AND apikey = %s AND ' + request.app.ctx.auth.KEY_VALID
+            values = (user, request.app.ctx.auth.hashkey(apikey), )
             info = {}
             access = {}
             apikey = ''
             await cur.execute(query, values)
             info = await cur.fetchall()
-            if len(info) == 0:
-                res = request.app.ctx.reply(request, False, {'username': user, 'apikey': apikey, 'access': access, 'info': info, 'redirect': request.app.config.env.str('REDIRECT_LOGON_SUCCESSFUL', default='/index.html')}, status=401)
-                return res
-            user, apikey, info, access = await request.app.ctx.auth.logon(request, user)
-            res = request.app.ctx.reply(request, True, {'username': user, 'apikey': apikey, 'access': access, 'info': info, 'redirect': request.app.config.env.str('REDIRECT_LOGON_SUCCESSFUL', default='/index.html')})
-            return res
+    if len(info) == 0:
+        res = request.app.ctx.reply(request, False, {'username': user, 'apikey': apikey, 'access': access, 'info': info, 'redirect': request.app.config.env.str('REDIRECT_LOGON_SUCCESSFUL', default='/index.html')}, status=401)
+        return res
+    # Log on after the connection is returned, logon() uses its own connection
+    user, apikey, info, access = await request.app.ctx.auth.logon(request, info[0]['user'])
+    res = request.app.ctx.reply(request, True, {'username': user, 'apikey': apikey, 'access': access, 'info': info, 'redirect': request.app.config.env.str('REDIRECT_LOGON_SUCCESSFUL', default='/index.html')})
+    return res
 
 @sub_bp.route("/apifile", methods=['POST'], stream=True)
 async def system_apifile(request):
@@ -41,6 +45,9 @@ async def system_apifile(request):
     Authenticate a user by uploading a file with their API key.
     """
     reply = request.app.ctx.reply
+    unavailable = request.app.ctx.auth.db_unavailable(request)
+    if unavailable:
+        return unavailable
     if await request.app.ctx.auth.throttled(request, 'logon'):
         return reply(request, False, {}, status=429, error="Too many attempts, please wait and try again.")
     # Read the body here (streamed route) so an oversized upload is rejected before it is buffered
@@ -94,8 +101,8 @@ async def system_apifile(request):
     await request.app.ctx.auth.logoff(request)
     async with request.app.ctx.pool.acquire() as conn:
         async with conn.cursor(aiomysql.DictCursor) as cur:
-            query = 'SELECT user FROM sanic_info WHERE apikey=%s'
-            values = (uuids, )
+            query = 'SELECT user FROM sanic_info WHERE apikey=%s AND ' + request.app.ctx.auth.KEY_VALID
+            values = (request.app.ctx.auth.hashkey(uuids), )
             await cur.execute(query, values)
             info = await cur.fetchall()
             if len(info) == 0:
