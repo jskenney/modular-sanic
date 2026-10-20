@@ -1,297 +1,227 @@
-# Modular Sanic: Repository Review
+# Modular Sanic: Repository Review (second pass)
 
-Reviewed at `3cb18e8` (main), 2026-10-19. No application code was changed. This file is the only addition.
+Reviewed at `af93b86` on main, 2026-10-20. This is after the two fix batches ([#1](https://github.com/jskenney/modular-sanic/pull/1) and [#2](https://github.com/jskenney/modular-sanic/pull/2)). It replaces the first review. Section 5 shows what happened to each earlier finding. No application code was changed.
 
-**How it was reviewed:** I read all of the Python, shell, SQL and HTML in the repo, plus the `jskenney/sanic-session` fork it depends on. I installed the dependencies in a Python 3.13 venv and ran `ruff` and `bandit`. Then I ran the server against real memcached 1.6 and MariaDB 10.11, loaded `setup/auth_tables.sql`, used `env-example` as `.env`, and tested the auth endpoints over HTTP. Findings marked **[verified]** were reproduced against that running instance.
+**How it was reviewed:** I re-read all of the Python, shell, SQL and HTML in the repo, and the `jskenney/sanic-session` fork it installs. I ran `ruff`, `bandit` and `pip-audit`, plus the fork's test suite. Then I ran the server (Sanic 25.12.1) against real memcached and MariaDB 10.11, with `env-example` as `.env` and an SMTP sink. I tested it over HTTP and in headless Chromium. Findings marked **[verified]** were reproduced against that running instance. The others come from reading the code.
 
 ---
 
 ## 1. Project map
 
 ### Purpose
-This is a thin layer on top of Sanic. It provides:
+This is a layer on top of Sanic. You drop a `.py` file that defines `sub_bp = Blueprint(...)` into a directory listed in `API_LOCATIONS`, and it is mounted at startup. The framework supplies:
 
-- **Endpoint auto-discovery.** You drop a `.py` file that defines `sub_bp = Blueprint(...)` into a directory listed in `API_LOCATIONS`, and it is mounted at startup.
-- **Sessions** through the `sanic_session` fork, stored in memcached, or in memory as a fallback.
-- **Logon methods:** PAM, an API key, an uploaded API-key file, an emailed one-time code, and admin "become user" (su).
-- **Shared clients:** a MySQL/MariaDB pool (`app.ctx.pool`), a memcached client (`app.ctx.mc`) and an auth helper (`app.ctx.auth`) that endpoint files can use.
-- **A static front end:** the `html/` directory, with logon pages under `html/logon/`.
+- **Sessions** through the `sanic_session` fork, stored in memcached, with an in-memory fallback.
+- **Logon methods:** PAM, an API key, an API-key file, an emailed one-time code, and admin "become user" (su).
+- **Shared helpers** for endpoint files: a MySQL/MariaDB pool, a memcached client, an auth helper and a response helper.
 
 ### Layout
 
 | Path | Role |
 |---|---|
-| `server.py` | The whole framework: env config, session setup, static routes, error pages, HSTS, blueprint discovery, DB and memcache listeners, and the `AuthVerification` class |
-| `api/auth/general/auth.py` | `/auth/deauth`, `/auth/key`, `/auth/info`, `/auth/refresh`, `/auth/rekey`, and `/auth/<apikey>/access/{list,add,remove}/...` |
-| `api/auth/pam/auth_pam.py` | `POST /auth/pam` (system username and password) |
-| `api/auth/apikey/auth_api.py` | `POST /auth/apikey` and `POST /auth/apifile` |
-| `api/auth/email/auth_email.py` | `POST /auth/request/challenge` (emails a 7-digit code) |
-| `api/auth/email/auth_challenge.py` | `POST /auth/challenge` (checks the code) |
-| `api/auth/switchuser/switch.py` | `POST /auth/su` and `GET /auth/return` |
-| `html/`, `html/logon/*.html` | Static UI. Each page has the same inline `AuthUI` JS and CSS (about 350 lines) |
-| `errors/404.html` | A 404 page. Nothing points at it by default |
-| `setup/*.sh`, `setup/auth_tables.sql` | Ubuntu install helpers and the schema (`sanic_info`, `sanic_access`, `sanic_challenge`) |
-| `start.sh` | Creates a venv in `/tmp/demo-venv` and starts `sanic server --debug --reload` |
-| `env-example` | Reference configuration |
+| `server.py` | The framework: env config, sessions, static files, error pages, security headers, blueprint discovery, DB and memcache listeners, `AuthVerification`, `reply()` |
+| `api/auth/general/auth.py` | `POST /auth/deauth`, `GET /auth/key`, `/auth/info` and `/auth/refresh`, `POST /auth/rekey`, `/auth/<apikey>/access/{list (GET), add, remove (POST)}`, `/auth/redirect_if_*` |
+| `api/auth/pam/auth_pam.py` | `POST /auth/pam` |
+| `api/auth/apikey/auth_api.py` | `POST /auth/apikey`, and `POST /auth/apifile` (streamed) |
+| `api/auth/email/auth_email.py`, `auth_challenge.py` | `POST /auth/request/challenge` (emails a code), and `POST /auth/challenge` (checks it) |
+| `api/auth/switchuser/switch.py` | `POST /auth/su` and `POST /auth/return` |
+| `html/logon/*.html`, `html/index.html` (a symlink to `logon/index.html`) | The logon UI. Each page has the same inline `AuthUI` script |
+| `errors/404.html` | The default 404 page. There is no `500.html` |
+| `setup/` | Install scripts, `auth_tables.sql` (safe to re-run), `auth_tables_reset.sql`, `migrate_apikey_hash.sql` |
+| `start.sh` | Creates a venv in `/tmp/demo-venv` on the first run; starts `sanic server --debug --reload --host=0.0.0.0` on later runs |
+| `env-example`, `README.md` | Configuration reference, and the developer guide (endpoint authoring, endpoint table, configuration table) |
 
 ### Startup and request flow
-1. `sanic server` imports `server.py`. This happens in the main process and again in every worker. On import it reads `.env` with `environs`, then probes memcached synchronously with `pymemcache` (`server.py:23-37`). If the probe works it registers `MemcacheSessionInterface`; otherwise it falls back to `InMemorySessionInterface`.
-2. It mounts `HTML` at `/` (`server.py:42-48`). It registers the 404 and 500 handlers only if those files exist (`server.py:52-62`).
-3. It walks each `API_LOCATIONS` directory. Any `.py` file whose text contains `sub_bp` is executed and its `sub_bp` is registered (`server.py:84-96`).
-4. In `before_server_start`, each worker creates its aiomcache client, its aiomysql pool (`MYSQLAVAIL` is set to True or False), `AuthVerification` and `pam.pam()`.
-5. For each request, sanic-session middleware loads `request.ctx.session` from the `session` cookie and saves it back on the response. Endpoints call `request.app.ctx.auth.verify(request)`, which only looks at the session, or `verifyapi(request, key)`, which tries the session first and then the DB API key. `logon()` loads `sanic_info` and `sanic_access` into the session.
-6. Authorization uses the `access` dict, which maps each access name to a list of values. The checks are hard-coded: `'admin' in access and 'permissions' in access['admin']`, and `... 'become' ...`.
-
-### How a dropped-in endpoint is expected to look
-```python
-from sanic import Blueprint, response
-sub_bp = Blueprint("my_feature", url_prefix="/api/my")
-
-@sub_bp.get("/thing")
-async def thing(request):
-    ok, user, apikey, access, info = await request.app.ctx.auth.verify(request)
-    if not ok: return response.json({"success": False}, status=401)
-    async with request.app.ctx.pool.acquire() as conn: ...
-```
-The README does not document this. See **L-DOC-1**.
+1. **Import, in the main process and in each worker:**
+   - Read `.env`, then probe memcached synchronously. If memcached answers, use `MemcacheSessionInterface`; otherwise use `InMemorySessionInterface`. Either way the cookie is `__Host-session`, Secure, with SameSite taken from `SAMESITE`, and it expires after `AUTH_VALID`.
+   - Register the static routes, the error pages, HSTS and the security headers middleware.
+   - Discover blueprints: walk `API_LOCATIONS` (resolved against `server.py`'s directory) in sorted order and skip `_*.py`. Import each file that mentions `sub_bp` under a unique module name, and register it if `sub_bp` is a `Blueprint`. A file that fails is logged and skipped.
+2. **`before_server_start`, in each worker:** create the aiomcache client, the aiomysql pool (`DB_POOL_MAX`, `autocommit=True`; `app.ctx.pool` is `None` if the database is down), `AuthVerification` and `reply()`.
+3. **Each request:**
+   - sanic-session loads `request.ctx.session` from the cookie and saves it back on the response.
+   - `verify()` uses the session only. It enforces the `AUTH_VALID` idle timeout and the `AUTH_MAX` absolute limit, and returns the user and access **cached in the session**.
+   - `verifyapi()` takes a key from a Bearer header or the URL. A key of `session`, `-` or `''` falls back to `verify()`. Any other key is hashed and looked up, then the access is loaded fresh with `access_show()`, without touching the session.
+   - `logon()` loads `sanic_info` and `sanic_access` into the session, issuing a new session ID when the identity changes. Logon routes are rate-limited per client address and per username, through memcached.
+4. **Authorization** checks the `access` dict in code: `admin/permissions` to manage access, and `admin/become` to su.
 
 ---
 
-## 2. Tool results
+## 2. Tool and test results
 
 | Check | Result |
 |---|---|
-| Test suite | **No tests exist** in this repo. There is no CI, no `pyproject`/`setup.cfg`, and no linter config. |
-| `ruff check --select E,F,W,B,S` | **47 findings**: 36 unused imports (`asyncio`, `re`, `openapi` and `aiomysql` in every endpoint file; `text`, `json`, `redirect`, `empty`, `sys` and `response` in `server.py`), multi-import lines, 2 bare `except:` (`server.py:206`, `server.py:218`), 1 in `auth_email.py:28`, a mutable default argument (`server.py:249`) and an unused loop variable (`server.py:85`). |
-| `bandit -r .` | 2 low findings: `try/except/pass` at `server.py:206` and `server.py:218`. |
-| `pip-audit` (installed env) | No known CVEs in the versions that resolved: sanic 25.12.1, sanic-ext 25.12.0, aiomysql 0.3.2, aiomcache 0.8.2, pymemcache 4.0.0, python-pam 2.1.0, environs 15.2.0, cryptography 50.0.2. |
-| `pip install -r requirements.txt` | **Fails** on Python 3.12+ unless you pass `--no-build-isolation`. The `sanic_session` fork pins `setuptools<60` in `pyproject.toml`, and that version imports `pkgutil.ImpImporter`, which no longer exists. `mysqlclient` also fails without `libmysqlclient-dev`, and nothing in the code uses it. |
-| sanic-session fork tests (`pytest tests`) | **21 failed, 18 passed, 1 error.** 10 failures are `TypeError: 'CookieJar' object is not subscriptable`: the fork moved to the new cookie API but the tests still index cookies like a dict. The error is a missing `event_loop` fixture (pytest-asyncio ≥0.23). The redis tests fail for the same reasons. |
-| `env-example` parsed by python-dotenv | `python-dotenv could not parse statement starting at line 38`. **`AUTH_DOMAIN` is silently dropped** (see M-6). |
+| Test suite | **None in this repo**, and no CI. Verification for this review used ad-hoc scripts against a live instance (see section 3). |
+| `ruff check --select E,F,W,B,S` | **52 findings**: 34 F401 unused imports, 14 E401 multi-import lines, 3 S608 and 1 B006 (`server.py:401` mutable default). |
+| `bandit -r .` | 3 × B608 "SQL built from strings" at `auth_api.py:27`, `auth_api.py:104` and `server.py:317`. **All false positives**: the appended text is the constant `AuthVerification.KEY_VALID`, and user data is always passed as parameters. |
+| `pip-audit` | No known vulnerabilities in the resolved set: sanic 25.12.1, sanic-ext 25.12.0, aiomysql 0.3.2, aiomcache 0.8.2, pymemcache 4.0.0, python-pam 2.1.0, environs 15.2.0, cryptography 50.0.2. These are the latest releases. |
+| `pip install -r requirements.txt` | Still fails on Python ≥3.12 unless you pass `--no-build-isolation`, because the fork pins `setuptools<60`. `mysqlclient` still needs native headers and nothing uses it. |
+| sanic-session fork tests | **21 failed, 18 passed, 1 error.** Nothing has changed in the fork since the first review (`f1494fb`). |
 
 ---
 
 ## 3. Findings
 
-Severity reflects impact × likelihood for a deployment that follows the README and `env-example`.
-
-### CRITICAL
-
-#### C-1. Cross-site request forgery can grant admin: permission changes are cookie-authenticated GETs **[verified]**
-- `api/auth/general/auth.py:111-126` (`/auth/<apikey>/access/add/<user>/<access>/<value>`), `:129-144` (`.../remove/...`), `:80-93` (`/auth/rekey`), `:10-23` (`/auth/deauth`)
-- `server.py:158-176`: `verifyapi()` **ignores the `<apikey>` path segment whenever the session cookie is valid**.
-- `server.py:30,34`: the session cookie is `SameSite=Lax`, and Lax cookies are still sent on top-level cross-site GET navigations.
-
-**Why it matters.** An admin who has `admin/permissions` and is logged in clicks a link, or is redirected by any page, to
-`https://site/auth/x/access/add/attacker/admin/permissions`. The browser sends the admin's cookie, the bogus `x` key is ignored, and the attacker becomes an admin. I reproduced this: a request carrying only the admin's cookie and `whatever` as the key wrote `alice|admin|permissions` to `sanic_access`. The same mechanism lets a third party rotate a user's API key (`/auth/rekey`, verified) and log users out.
-
-**Fix.**
-- Make every state-changing route `POST`, `PUT` or `DELETE`, and parse its parameters from the body.
-- Require an anti-CSRF token or a custom header (for example `X-Requested-With`, which a cross-site form cannot set) on cookie-authenticated mutations. You can also check `Origin`.
-- In `verifyapi`, when a key is supplied, validate **the key**. Do not fall back to the session. Better still, take the key from an `Authorization: Bearer` header rather than the URL (see M-1).
-- Consider `SameSite=Strict` for the session cookie, since the logon pages are same-origin anyway.
+There are no **critical** findings in this pass. The cross-site admin grant (old C-1) is fixed and verified.
 
 ### HIGH
 
-#### H-1. Session fixation: the session ID is never rotated at logon, and client-chosen IDs are accepted **[verified]**
-- `server.py:249-285` (`logon`) and `server.py:178-179` (`logoff` only does `session.clear()`).
-- `sanic-session/sanic_session/base.py:121-133`: any cookie value is accepted as the session ID, even one that does not exist in the store.
+#### H-1. Revoked access keeps working in existing sessions **[verified]**
+- `server.py:293-302`: `verify()` returns the `access` that `logon()` copied into the session. Nothing re-reads `sanic_access` until that user logs on again or calls `/auth/refresh`.
+- Every session-authenticated permission check relies on this copy: `auth.py:105,121,144` (through `verifyapi` with `-`/`session`) and `switch.py:45`.
 
-**Why it matters.** I sent `Cookie: session=attackerchosen` to `/auth/apikey`. The response set `session=attackerchosen`, and a second client using that same value was then authenticated as `alice`. Anyone who can plant a cookie can do this: a sibling subdomain, an HTTP downgrade before HSTS is in place, or XSS on any `*.domain`.
+**Why it matters.** I deleted **all** of `admin`'s rows from `sanic_access`, then made a request with admin's existing session. It still granted `admin/permissions` to `alice`. The same admin using an API key, which is looked up fresh, got 403. Because `AUTH_VALID` is a sliding window, an admin who has been removed keeps full rights for up to `AUTH_MAX`, 30 days by default, as long as they stay active. The README's advice to "use `/auth/refresh`" only helps if the removed user chooses to call it.
 
-**Fix.** Issue a fresh session ID in `logon()`, `su` and `return`: delete the old store key, assign a new `uuid4().hex` to `session.sid`, and mark the session modified. In the sanic-session fork, ignore a cookie ID that has no stored value and generate a new one. Name the cookie `__Host-session` so subdomains cannot set it.
+**Fix.** Load access from the database in `verify()` when MySQL is available. It is one indexed query on `sanic_access(user, …)`. Optionally cache it for a few seconds (`ACCESS_CACHE_SECONDS`). Alternatively, keep an `access_version` per user in `sanic_info`, bump it in `access_add`/`access_del`, and reload when the session's copy is stale.
 
-#### H-2. The email challenge can be brute-forced, has a race, and leaks which users exist **[verified]**
-- `api/auth/email/auth_email.py:19-29`: a 7-digit code, and `ON DUPLICATE KEY UPDATE ... attempts=0` resets the counter whenever a new code is requested.
-- `api/auth/email/auth_challenge.py:20-27`: `SELECT ... attempts < 10` followed by a separate `UPDATE attempts+1`. This is check-then-act with no lock.
+#### H-2. Bad request bodies still crash with a 500, and `start.sh` runs debug mode on all interfaces **[verified]**
+- The handlers read `request.json[...]` without checking it: `auth_api.py:19-21`, `auth_challenge.py:16-18`, `auth_email.py:23-25`.
+- `start.sh:22-25` runs `--debug --reload -R . --host=0.0.0.0`.
+
+**Why it matters.** I got 500s from:
+- `POST /auth/apikey` with an empty body, and with `{}`;
+- `/auth/challenge` without `challenge`;
+- `/auth/request/challenge` with a JSON list.
+
+`errors/500.html` doesn't exist, so the custom 500 page is not active by default. Under `start.sh`'s `--debug`, those 500s return full tracebacks to anyone who can reach the server. (`/auth/su` already validates its input and returns 400.)
+
+**Fix.** Validate input and return 400, with `sanic-ext` `@validate` or with `data = request.json if isinstance(request.json, dict) else {}` plus `.get()` and type checks. Split `start.sh` into a development mode (`--dev` bound to `127.0.0.1`) and a production example (no debug, with `--cert`/`--key`).
+
+#### H-3. Behind a reverse proxy, everyone shares one rate-limit bucket and HSTS is never sent **[verified]**
+- The rate limiter keys on `request.remote_addr or request.ip` (`server.py:286`).
+- HSTS checks `request.scheme == 'https'` (`server.py:100`).
+- Neither is correct behind a proxy unless Sanic's proxy settings (`SANIC_PROXIES_COUNT`, `SANIC_REAL_IP_HEADER` or `SANIC_FORWARDED_SECRET`) are configured. The README recommends a TLS-terminating proxy (`README.md:25`) but mentions none of these.
 
 **Why it matters.**
-- With 40 concurrent wrong guesses, a correct guess placed **13th still succeeded**, so the 10-attempt limit can be exceeded.
-- There is no rate limit per IP or per user anywhere. Requesting a new challenge resets the counter, so an attacker can keep guessing indefinitely. It costs about 10⁶ guesses on average, and the victim's inbox gets flooded (an email-bomb vector too).
-- Responses reveal whether a user exists: an unknown user returns `200 {"success": false}` because the `sanic_challenge → sanic_info` foreign key rejects the insert, while a known user returns `success: true`, or a 500 if SMTP is down.
-- The attempt counter is not compared in constant time, though that is minor next to the issues above.
+- With the default config, 10 failed logons from 10 different `X-Forwarded-For` addresses exhausted the single per-IP bucket. The **real admin's** next logon then got **429**. Behind a proxy, any one person can lock every user out of every logon route, in a loop, for as long as they like.
+- With `X-Forwarded-Proto: https`, no `Strict-Transport-Security` header was sent. With `SANIC_PROXIES_COUNT=1` it was.
 
-**Fix.**
-- Increment and check atomically: `UPDATE sanic_challenge SET attempts=attempts+1 WHERE user=%s AND attempts<5 AND sent > NOW()-INTERVAL 10 MINUTE`, then check `rowcount` before comparing the code.
-- Do not reset `attempts` on re-request, or cap requests per user per hour.
-- Add rate limiting per IP and per user (a memcached counter works) for `/auth/request/challenge`, `/auth/challenge`, `/auth/pam` and `/auth/apikey`.
-- Always return the same response for "challenge requested".
-
-#### H-3. PAM and SMTP block the event loop, so a few failed logons stall every request **[verified]**
-- `api/auth/pam/auth_pam.py:20`: `request.app.ctx.pam.authenticate(u, p)` is synchronous.
-- `api/auth/email/auth_email.py:38-39`: `smtplib.SMTP(...).send_message` is synchronous.
-
-**Why it matters.** One wrong-password PAM call took **3.4 s**, mostly `pam_faildelay`. While 5 bad logons were in flight, a simple `GET /auth/key` took **13.6 s**. Anyone can freeze a worker with a handful of requests, and with no rate limit (H-2) PAM is also an online brute-force oracle for **system accounts**, root included.
-
-**Fix.** Use `await asyncio.to_thread(pam.pam().authenticate, u, p)` with a fresh `pam` object per call, because the shared object stores `code` and `reason` state. Do the same for SMTP, or use `aiosmtplib`. Add rate limiting, and restrict PAM logon to an allow-listed group, for example with a `pam_succeed_if` service file instead of the default `login` service.
-
-#### H-4. `start.sh` runs debug mode on all interfaces, and bad input becomes a 500 with a traceback **[verified]**
-- `start.sh:22-25`: `--debug --reload -R . --host=0.0.0.0`
-- `auth_api.py:14-16`, `auth_challenge.py:14-16`, `auth_email.py:16-17` and `switch.py:39-40` all use `request.json[...]` without validation.
-
-**Why it matters.** A `POST /auth/apikey` with no body returned 500 with a full Python traceback (`TypeError: 'NoneType' object is not subscriptable`). `{}` returned a JSON body that exposed `KeyError: 'username'` and the exception chain. A malformed `session` cookie (`"a b"`, or longer than 250 characters) also returns 500 (aiomcache `ValidationException`). The sample script is what people copy, and it exposes internals on every interface.
-
-**Fix.** Ship two scripts: dev (`--dev`, bound to `127.0.0.1`) and prod (no `--debug`, workers, TLS). Validate inputs. `sanic-ext` and `pydantic` are already installed, so use `@validate(json=Model)`, or at least `data = request.json or {}` with `.get()` and a 400 response. Catch `aiomcache.exceptions.ValidationException` in the session layer and treat that cookie as absent.
-
-#### H-5. "Become" (su) is too strong and `/auth/return` skips the session timeout
-- `api/auth/switchuser/switch.py:29-44`:
-  - Any user with `admin/become` can become **any** user, including other admins with `permissions`, which is privilege escalation.
-  - They receive the target's **permanent API key** in the response (`:41`), so the access outlives the su session.
-  - `logon(request, data['username'])` **creates a `sanic_info` row for any string** (verified: `su` to `ghost-user` created a row with a fresh key).
-- `switch.py:9-19`: `/auth/return` restores `original_user` without calling `verify()`. It ignores `AUTH_VALID`, so an idle session up to the 30-day memcache lifetime can be returned to admin, and it never re-checks that the original user still has `become`. None of these actions is logged for audit.
-
-**Fix.**
-- Refuse to become users who have `admin/*`, unless the actor has a higher privilege.
-- Do not return the target's `apikey` in the su response.
-- Refuse unknown usernames: check `sanic_info` first.
-- Call `verify()` in `/auth/return` and re-check the original user's rights.
-- Log every su and return.
-
-#### H-6. Running without MySQL crashes most auth endpoints, though the README says MySQL is optional **[verified]**
-- `server.py:114-115` says MySQL is optional, and `setup_db` sets `MYSQLAVAIL=False` without creating `app.ctx.pool`.
-- `verifyapi` (`server.py:160`), `auth_api.py:18,75`, `auth_challenge.py:18` and `auth_email.py:24` all use `request.app.ctx.pool` with no guard. Each returns a 500 `AttributeError`.
-- `access_show` (`server.py:222-224`) returns the **calling** user's session data instead of the `user` that was asked for.
-
-**Fix.** Set `app.ctx.pool = None`. Have each DB-backed endpoint return a clear `503 {"error": "database unavailable"}`, or skip loading those blueprints when `MYSQLAVAIL` is false. Fix `access_show` to return empty data for other users.
+**Fix.** Document the proxy settings in the README and `env-example`, and recommend `SANIC_PROXIES_COUNT=1` (or `FORWARDED_SECRET`) for the nginx/caddy setup. Consider logging a startup warning when `X-Forwarded-For` headers arrive but none of the proxy settings are configured.
 
 ### MEDIUM
 
-#### M-1. API keys are stored in plain text, never expire, and travel in URLs
-- `setup/auth_tables.sql:11` stores `apikey` in plain text.
-- `server.py:162` and `auth_api.py:20` look keys up directly.
-- `auth.py:96,111,129` put the key in the **URL path**, so it lands in Sanic access logs, proxy logs, browser history and `Referer` headers.
-- `/auth/key`, `/auth/info` and `/auth/refresh` return the key to any page script, so any XSS turns into a permanent credential.
+#### M-1. Users are logged on under the name they typed, not the name in the database **[verified]**
+- `auth_challenge.py:41` calls `logon(request, user)` and `auth_pam.py:28` calls `logon(request, u)` with the name as typed.
+- `logon()` (`server.py:415-418`) looks it up with MySQL's case-insensitive collation, but stores the typed string as `session['user']`. (`/auth/apikey`, `/auth/apifile` and su already use the canonical `info[0]['user']`.)
 
-**Fix.** Store `sha256(key)` and compare against the hash. Accept keys only through `Authorization: Bearer`. Add `created`/`expires` columns. Return the key only once, at creation or `rekey`.
+**Why it matters.**
+- A challenge logon as `CAROL` succeeded with carol's access, but the session user was `CAROL`. Carol then got **403** listing her own access, because `auth.py:105` compares `username == user` in Python.
+- For PAM, two system accounts that differ only in case, or a case-insensitive PAM backend such as SSSD or LDAP, map onto the **same** `sanic_info` row and access. A newly created `Admin` account would inherit `admin`'s rights.
+- The per-user rate-limit bucket is keyed by the raw string, so case variants each get their own bucket.
 
-#### M-2. Permission writes swallow errors and always report success **[verified]**
-`server.py:204-207` and `:216-219` use bare `except: pass`. Granting access to a user who does not exist fails the foreign key check, the error is discarded, and the endpoint still returns `success: true`. Fix: catch `pymysql.err.IntegrityError`, return `success: false` with a reason, and log the rest.
+**Fix.** In `logon()`, use `info[0]['user']` as the identity. Make `sanic_info.user` case-sensitive (`VARCHAR(64) COLLATE utf8mb4_bin`), or normalise usernames to lower case everywhere, including in the rate-limit key.
 
-#### M-3. The session backend is chosen once, at import, and the in-memory fallback is silently per-worker
-`server.py:23-37`. If memcached is down at boot, or slow to start under systemd or compose, every worker uses its own `InMemorySessionInterface`. With `--workers N` or `--fast`, users then get randomly logged out and sessions vanish on reload. I saw this when starting with 2 workers. The only signal is a `print`. Fix: make the fallback opt-in (`SESSION_BACKEND=memcache|memory`) and fail fast otherwise. Use one aiomcache client for both the session interface and `app.ctx.mc`, created in `before_server_start`. Today there are two clients, and the session one is never closed. Use `env.int('MEMCACHED_PORT')`.
+#### M-2. A blueprint that fails partway through registration stays half-loaded **[verified]**
+`server.py:159-163`. `app.blueprint()` registers routes one at a time. When a later route clashes with an existing one, Sanic raises `RouteExists` and the `except` logs "Failed to load blueprint". The routes registered before the clash stay live. In my test, `ext/b_two.py` was reported as failed, yet its `/ext/other` route answered 200.
 
-#### M-4. A `Secure` cookie plus plain HTTP means logon "works" but never sticks
-`server.py:30,34` set `secure=True`, while `start.sh` serves plain HTTP on `0.0.0.0`. Browsers drop `Secure` cookies on non-localhost `http://`. Logon returns `success` and then every page acts as if you are logged off. The README never mentions TLS. Fix: document that TLS is required (the `--cert`/`--key` example belongs in the README), or make it `SESSION_SECURE` and default it to true only when TLS is configured.
+**Fix.** Before calling `app.blueprint()`, check the blueprint's routes against `app.router` (or register into a scratch app first). Or treat a route conflict as fatal, because two files claiming the same path is a deployment error.
 
-#### M-5. The session timeout is idle-only, and different expiry values conflict
-- `AUTH_VALID` (`server.py:148,159`) is a **sliding** idle timeout, because `visit` is refreshed on every call.
-- The memcache entry and the cookie live 30 days (sanic-session default `expiry=2592000`) and slide as well.
-- There is no absolute session lifetime, and expired data stays readable by anything that does not call `verify()`, which is how H-5's `/auth/return` gap arises.
+#### M-3. The default start script gives remote browsers logons that never stick **[verified]**
+`start.sh:22-25` serves plain HTTP on `0.0.0.0`, but the session cookie is `__Host-`/`Secure` (`server.py:38-44`). In Chromium, using a non-localhost hostname over HTTP, the logon page reported success and redirected to `/index.html`. **No cookie was stored**, and `/auth/key` returned 401. The README says TLS is required, but the sample script ignores that.
 
-**Fix.** Pass `expiry=AUTH_VALID` to the session interface. Add `logon_at` and enforce an absolute maximum (`AUTH_MAX`).
+**Fix.** Bind `start.sh` to `127.0.0.1` for development, and add a TLS example. Optionally log a warning on the first request whose scheme is `http` and whose host isn't localhost.
 
-#### M-6. `env-example` breaks email logon: an unterminated quote, plus a default with no `@` **[verified]**
-- `env-example:38`: `AUTH_DOMAIN='@example.com` is missing its closing quote, so python-dotenv drops the line.
-- `auth_email.py:36` then falls back to `default='example.com'`, which has no `@`, and mails `aliceexample.com`.
-- The inline `# comments` after values (lines 23-39) only work because of dotenv's unquoted-value rules. They are fragile and break the same way.
+#### M-4. `AUTH_VALID` above 30 days logs everyone out immediately **[verified]**
+`server.py:29,38` passes `AUTH_VALID` to `MemcacheSessionInterface`. When the value is over 2,592,000 seconds, the fork switches it to `0` (`sanic_session/memcache.py:70-72`) and uses it as the cookie `Max-Age` (`base.py:71`). With `AUTH_VALID=3000000`, the logon response carried `Max-Age=0`, so the browser drops the cookie at once and nobody can stay logged on.
 
-**Fix.** Close the quote. Change the default to `'@example.com'`, or better, build the address as `f"{user}@{domain}"`. Move comments onto their own lines.
+**Fix.** In `server.py`, pass `min(AUTH_VALID, 2592000)` to the memcache interface. `verify()` still enforces `AUTH_VALID` itself. Fix the fork so `expiry=0` doesn't produce `Max-Age=0`.
 
-#### M-7. `DB_AUTOCOMMIT=False` silently loses every write
-`server.py:125` exposes `DB_AUTOCOMMIT`, but nothing calls `await conn.commit()`. If someone sets it to False, new keys, grants and challenges are rolled back when the connection returns to the pool. Fix: remove the option, or commit explicitly in each write helper.
+#### M-5. The session backend is still chosen once at import, and memcached is a single point of failure (old M-3) **[verified]**
+`server.py:31-47`. If memcached is down at boot, every worker silently uses its own in-memory store. Users then get logged out at random under `--workers N`, and sessions are lost on every reload. If memcached goes down while the server is running, every logon returns **500** (verified), and so does every request that carries a session cookie, static pages included. The memcached client is also created twice (`server.py:36` and `:170`), and the session one is never closed.
 
-#### M-8. `logon()` holds one pooled connection while `genapikey()` acquires a second
-`server.py:260-267` → `server.py:184`. Each first-time logon needs 2 of the pool's default 10 connections. Under a burst of new-user logons, the pool can be exhausted with every holder waiting on its second connection, which is a deadlock. **I could not reproduce this with 30 concurrent first logons** on a local DB, because requests finished too fast, but the pattern is unsafe. Fix: pass `cur` into `genapikey`, or generate the key inline. Also set `maxsize` from the environment.
+**Fix.** Choose the backend explicitly (`SESSION_BACKEND=memcache|memory`) and fail fast. Create one client in `before_server_start` and use it for both. Catch backend errors in the session layer: treat the session as empty and return 503 on logon.
 
-#### M-9. Blueprint auto-discovery is fragile
-`server.py:84-96`:
-- **Substring match.** Any file that merely mentions `sub_bp`, even in a comment or docstring, is executed. If it does not define `sub_bp`, startup crashes with `AttributeError`.
-- **Every module is named `"sub_bp"`.** Tracebacks are confusing, `pickle` and `multiprocessing` cannot resolve the module, and helper modules in the same folder cannot be imported (`from . import util` fails), because nothing is added to `sys.modules` or `sys.path`.
-- **Order is not deterministic.** `os.walk` filenames are unsorted. If two files define the same route, which one wins depends on filesystem order. Duplicate blueprint names crash startup with a vague error.
-- **One bad file stops the whole server.** There is no per-file `try/except` with a clear log line.
-- **Paths are relative to the current directory**, not to `server.py`, which contradicts the `env-example` comment. Starting from another directory loads nothing.
-- **Code in these directories runs with the server's privileges**, which include `shadow` group membership (see M-12). Directory permissions are the security boundary, and the README does not say so.
+#### M-6. `admin/permissions` is unrestricted, and access changes aren't logged
+`auth.py:113-156`. A user holding `admin/permissions` can grant **any** access to anyone, including themselves. I verified a self-grant of `admin/super`, which defeats su's "never become a user with more admin access" rule (`switch.py:56-59`). su and return are logged (`switch.py:26,31,58,63`), but grants and removals are not, so there is no audit trail for the most powerful operation.
 
-**Fix.**
-- Sort the walk.
-- Import with a unique name, for example `modsanic.ext.<relpath>`, and register it in `sys.modules`.
-- Detect the blueprint with `isinstance(getattr(mod, 'sub_bp', None), Blueprint)` after import, not with a text search.
-- Wrap each file in `try/except` and log failures.
-- Resolve paths against `Path(__file__).parent`.
-- Skip `_*.py` and `__init__.py`.
+**Fix.** Log every `access_add`/`access_del` with actor, target, access, value and client address. Decide whether `permissions` may grant `admin/*` values, and if not, enforce it. At minimum, document that `permissions` is equivalent to root.
 
-#### M-10. Error pages are misconfigured by default and read synchronously on every hit **[verified]**
-- `server.py:52` and `env-example:25` default `PAGE_404` to `./html/404.html`, but the file lives at `errors/404.html`. 404s are therefore plain text (verified: `text/plain`).
-- `PAGE_500` handles only `ServerError`, so unhandled exceptions, which are what actually happen (H-4), bypass it.
-- `open(...).read()` runs on every error and never closes the file.
+#### M-7. Dependency health (old M-13)
+- `requirements.txt` pins nothing.
+- The fork is installed from a moving `git+https://…` HEAD. Its `pyproject.toml` pins `setuptools<60`, which breaks a normal install on Python ≥3.12. Its tests are red.
+- `mysqlclient` (which needs native build headers), `six`, `orjson` and `pydantic` are unused. `pymemcache` is only used for the startup probe.
 
-**Fix.** Point the default at `errors/404.html`. Read both pages once at startup. Register the 500 page for `Exception`, and log the exception.
+**Fix.** Use a lock file (`pip-tools` or `uv`) and pin the fork to a tag or SHA. Fix the fork's build requirement (`setuptools>=61`) and its tests. Drop the unused packages.
 
-#### M-11. Missing browser security headers
-No CSP, `X-Frame-Options`/`frame-ancestors`, `X-Content-Type-Options` or `Referrer-Policy` headers are sent (verified on `/`). The logon and su pages can be framed, which allows clickjacking. HSTS is enabled only when `HSTS` is in `os.environ` (`server.py:72`), and it adds `includeSubDomains` unconditionally. `showModal(data.message, {html:true})` (for example `html/logon/logon.html:344`) puts `AUTH_MESSAGE` into the page with `innerHTML`. That is acceptable as trusted config, but it is one more reason for a CSP. Fix: add a single response middleware that sets these headers.
+#### M-8. No automated tests or CI (old M-14)
+The auth logic is now substantial: rotation, rate limits, su rules, key hashing and expiry, 503 handling, discovery. None of it is protected against regressions.
 
-#### M-12. Setup adds the service user to `shadow` and enables directory listing
-- `setup/setup.sh:23` adds the user to the `shadow` group, so the web process and every auto-loaded endpoint can read `/etc/shadow`.
-- `env-example:4` sets `SHOW_SITE_CONTENTS=True`, which lists any directory under `html/` that has no `index.html`.
+**Fix.** Add `pytest` with `sanic-testing`, using the in-memory session backend and a MariaDB service container in GitHub Actions. The ad-hoc checks used for PRs #1 and #2 (about 70 cases) are a ready-made starting list. Add `ruff` to CI.
 
-**Fix.** Use a dedicated PAM service, or `unix_chkpwd`, which is setuid and avoids shadow membership. If you keep shadow membership, run as a dedicated user and document the risk. Default the listing to `False` in `env-example`.
+#### M-9. Setup still grants `shadow`, and the example enables directory listings (old M-12)
+`setup/setup.sh:23` adds the service user to the `shadow` group. The README now explains the risk, but the script still does it by default. `env-example:11` sets `SHOW_SITE_CONTENTS=True`.
 
-#### M-13. Dependency health
-- `requirements.txt` pins nothing. Sanic makes breaking changes between yearly LTS releases (`24.12` → `25.x`). A fresh install today pulls sanic 25.12, and nothing stops a future major release.
-- `sanic_session@git+https://github.com/jskenney/sanic-session` follows the moving `HEAD` of a fork. That is a supply-chain and reproducibility risk. The fork's `pyproject.toml` (`setuptools<60`) breaks normal `pip install` on Python ≥3.12, and its own test suite is red (section 2).
-- These packages are unused, or not needed directly: `mysqlclient` (needs native build headers and nothing imports it), `six`, `orjson`, `pydantic` (unless adopted for H-4), and `ujson` (pulled in by sanic-session anyway). `pymemcache` exists only for the startup probe, which aiomcache can do.
-- `setuptools` and `wheel` in runtime requirements only exist to support `--no-build-isolation`.
-
-**Fix.** Pin to a lock file (`pip-tools` or `uv`). Pin the fork to a tag or commit (`@v0.8.1` or `@<sha>`). Fix the fork's build requirement (`setuptools>=61`) and its tests. Drop unused packages.
-
-#### M-14. No tests, CI or lint configuration
-There are no tests at all, so none of the auth logic above (CSRF, timeouts, su, challenge) is protected against regressions.
-
-**Fix.** Add a `pytest` suite using `sanic-testing` (`app.asgi_client`), the in-memory session backend and a MySQL service container in GitHub Actions. Start with these cases:
-- logon via apikey, success and failure;
-- the `verify()` timeout;
-- the `access/add` permission check, including the CSRF case;
-- su and return privilege rules;
-- challenge attempt limits;
-- the no-MySQL behaviour;
-- blueprint discovery with fixtures (bad file, comment-only `sub_bp`, duplicate name).
-
-Add `ruff` and a GitHub workflow.
+**Fix.** Make the `shadow` step opt-in, and point to a dedicated `PAM_SERVICE` instead. Set `SHOW_SITE_CONTENTS=False` in `env-example`.
 
 ### LOW
 
 | ID | Location | Issue | Fix |
 |---|---|---|---|
-| L-1 | `server.py:249` | Mutable default `access={}`. With the in-memory backend and no MySQL, the same dict object is shared by every caller's session. | Use `access=None`, then `access = access or {}`. |
-| L-2 | `server.py:182,198,210,222,250` | `AuthVerification` reads the module-global `app` rather than `request.app`. This couples it to `server.py` and blocks testing or reuse. | Use `request.app.config.MYSQLAVAIL`, or pass config into `__init__`. |
-| L-3 | `server.py:147-176` vs `:178-285` | `verify`/`verifyapi` and `logon`/`access_show` duplicate their session and DB loading code (the access-dict build appears twice). | Write `_load_user(cur, user)` and `_session_tuple(session)` helpers. |
-| L-4 | Every endpoint | The response envelope `{'success','sent','endpoint','data'}` is built inline about 30 times. `endpoint` is hard-coded and sometimes wrong (`'/auth/apikey/'` has a trailing slash; the access routes echo raw user input). `sent` is local-time `asctime`. Failures return HTTP 200. | Add one `reply(request, ok, data, status=...)` helper using `request.path` and an ISO-8601 UTC time. Return 401/403 on auth failure. |
-| L-5 | `api/auth/apikey/auth_api.py:62-70` | `/auth/apifile` regex-scans `str(File(...))`, the repr of the uploaded bytes. The field must be named `files[]`, and the 10 KB check runs only after Sanic has buffered up to `REQUEST_MAX_SIZE` (100 MB by default). | Decode `request.files.get('files[]').body` explicitly. Lower `REQUEST_MAX_SIZE` for this route, or check `Content-Length`. |
-| L-6 | `server.py:148-150` | `verify()` calls `logoff()`, which clears the session, on every anonymous request. Besides the extra writes, this wipes `motd` and anything else an endpoint stored before logon. | Clear only the auth keys (`user`, `access`, `info`, `apikey`, `visit`). |
-| L-7 | `api/auth/email/auth_email.py:38` | An SMTP failure raises a 500 after the code has already been stored, and the user gets no clear message. | `try/except smtplib.SMTPException`, then return `success: false`. |
-| L-8 | `api/auth/*/*.py:2-4`, `server.py:3-8` | 36 unused imports (see ruff in section 2). | `ruff --fix`. |
-| L-9 | `html/logon/*.html` | The same roughly 350-line `AuthUI` script and identical CSS are copied into 8 pages (7 of the `<style>` blocks are byte-identical). `html/index.html` is byte-identical to `html/logon/index.html`. | Move them to `/logon/auth-ui.js` and `/logon/auth-ui.css`, which also makes a strict CSP possible (M-11). |
-| L-10 | `start.sh:5-28` | The first run only installs and exits, so you must run it twice. The venv lives in `/tmp` and is wiped on reboot. It sets a dead `SANIC_CONFIG_FILE=config.py`, though `config.py` was removed. It uses `python3`, while `setup.sh:7-9` installs `python3.11` from the deadsnakes PPA (Ubuntu 24.04 ships 3.12). `-R .` reload-watches the whole tree, including `html/`. | Install if needed, then always start. Use `./.venv`. Drop `SANIC_CONFIG_FILE`. Pick one Python version. Use `-R api`. |
-| L-11 | `setup/install-mysql.sh` | `read -p` echoes the password (`:39`). The user, password and database name are spliced into SQL and shell unquoted (`:43-45`). It creates `'user'@'%'` (any host) and grants `ALL PRIVILEGES`. It sets `query_cache_size` (`:29`), which MySQL 8 no longer has. `< auth_tables.sql` is relative (`:48`), so it must be run from `setup/`. Ten repeated `sed` passes (`:18-27`). The comment mentions `config.py` (`:50`). | `read -s`. Use `'localhost'` and least-privilege grants (`SELECT, INSERT, UPDATE, DELETE`). Use `"$(dirname "$0")/auth_tables.sql"`. Use `sed -E 's/ +/ /g'`. |
-| L-12 | `setup/auth_tables.sql:4-6` | Re-running the schema `DROP`s all user data with no warning. | Use `CREATE TABLE IF NOT EXISTS`, and put destructive resets in a separate file. |
-| L-13 | `setup/install-443-redirect.sh:7-11` | `DEST` breaks with more than one IPv4 address (the comment admits it). It adds a `PREROUTING` rule only, so local `https://host` does not redirect. Each run appends a duplicate rule. | Use `--dport 443` without `--destination`, or `-C` before `-A`. Also suggest Sanic behind nginx or caddy. |
-| L-14 | `server.py:24-29` | `MEMCACHED_PORT` is read as a string and probed with a second library at import time, in every process (the main process plus each worker). | Use `env.int`, and probe once in `before_server_start` with aiomcache. |
-| L-15 | `server.py:56,62` | Error-page handlers `open()` files without closing them. | See M-10. |
-
-#### Docs and developer experience
-- **L-DOC-1 (README).** The README covers discovery only. It is missing:
-  - how an endpoint checks auth and permissions (`app.ctx.auth.verify`, the `access` dict format);
-  - how to use `app.ctx.pool` and `app.ctx.mc`;
-  - the DB schema and how to create the first admin. There is no bootstrap: someone has to hand-insert `sanic_access(user,'admin','permissions')`;
-  - the TLS requirement (M-4) and the Linux PAM and `shadow` requirement;
-  - a table of every environment variable with its default. `PAGE_500`, `DB_AUTOCOMMIT` and `DOCUMENTATION` are undocumented, and `HSTS` has odd semantics;
-  - the list of built-in `/auth/*` endpoints and their contracts.
-
-  It also has typos ("te most important"), and its reload claim is overstated: `-R` reloads existing files, but **new** files are found only when the server restarts, because discovery happens at import.
-- **L-DOC-2.** `.dockerignore` exists but there is no `Dockerfile` or `compose.yml`, even though the README mentions Docker.
-- **L-DOC-3.** `.gitignore` lists `__pycache__` three times and `*.log` twice, and includes LaTeX and wine entries. That is harmless clutter.
+| L-1 | `server.py:401` | Mutable default `access={}` in `logon()`. | Use `access=None`. |
+| L-2 | `server.py:332,349,363,373,402` | `AuthVerification` reads the module-global `app` instead of `request.app`. | Use `request.app.config.MYSQLAVAIL`. |
+| L-3 | `server.py:372-398` and `:410-442`; every endpoint | The access-dict query and build are duplicated. Reply payloads repeat the same `env.str('REDIRECT_…')`/`LOGON_LOGO` lookups dozens of times. | Add a `_load_user(cur, user)` helper and small payload helpers. |
+| L-4 | `api/auth/*/*.py:1-5`, `server.py:3-11,456` | 34 unused imports. `app.ctx.pam` is now dead code, because `auth_pam.py` creates its own handle, yet `server.py` still imports `pam`, so libpam is required even when the PAM endpoint isn't loaded. | `ruff --fix`; remove `app.ctx.pam` and the import. |
+| L-5 | `sanic_session/base.py:166-168` (fork) | Every response to a request carrying a session cookie rewrites the session in memcached and re-sends `Set-Cookie`, including static files (verified for `/logon/logo.webp`, `/favicon.ico` and `/index.html`). | In the fork, save only when the session was modified, or refresh the cookie at most once per interval. |
+| L-6 | `setup/auth_tables.sql:9`; `html/logon/index.html:254`; `auth.py:76-96` | API keys: `sanic_info.apikey` has no index, so each API-key request scans the whole table (verified with `EXPLAIN`: `type=ALL`). Keys are still accepted in the URL path, and the `index.html` examples put the new key into URLs, which then land in logs. `POST /auth/rekey` needs no re-authentication, so a stolen session can mint a 1-year key that outlives logoff. | Add `KEY idx_apikey (apikey)`. Show Bearer-header examples. Require a recent logon (`logon_at` within N minutes) for rekey. |
+| L-7 | `auth_email.py:25` | `'?user=' + username` is not URL-encoded, and a non-string username raises `TypeError` (500). | `urllib.parse.quote(str(username))` after validation (H-2). |
+| L-8 | `auth_api.py:27,104`, `server.py:317` | Bandit B608 false positives from string concatenation. | Inline `KEY_VALID` into the literal, or add `# nosec B608` with a comment. |
+| L-9 | `html/logon/*.html` | The same roughly 350-line `AuthUI` script and CSS appear in 8 pages. (`html/index.html` is a symlink, not a copy, which corrects the first review.) | Move them to shared `/logon/auth-ui.js` and `.css`, which also enables L-12. |
+| L-10 | `start.sh:5-28`, `setup/setup.sh:7-9` | `start.sh` must be run twice, keeps the venv in `/tmp`, sets a dead `SANIC_CONFIG_FILE=config.py`, and watches the whole tree with `-R .`. `setup.sh` installs Python 3.11 while `start.sh` uses `python3` (3.12 on Ubuntu 24.04). | Install if needed, then start. Use `./.venv` and `-R api`. Use one Python version. |
+| L-11 | `setup/install-mysql.sh:29,38-48`; `setup/migrate_apikey_hash.sql` | `install-mysql.sh` echoes the password, splices unquoted input into SQL, grants `ALL` to `'user'@'%'`, sets `query_cache_size` (removed in MySQL 8), and uses a relative path to `auth_tables.sql`. The migration fails if run twice: `ADD COLUMN` has no `IF NOT EXISTS` on MySQL 8. | `read -s`, quoting, least privilege, `"$(dirname "$0")"`. Guard the migration with `information_schema` checks. |
+| L-12 | `server.py:113-115` | The default CSP must allow `'unsafe-inline'` scripts and styles for the bundled pages, so it gives little XSS protection. | After L-9, drop `'unsafe-inline'` from `script-src`. |
+| L-13 | `errors/` | There is no `500.html`, so the `PAGE_500` default does nothing out of the box. | Ship a simple `errors/500.html`. |
+| L-14 | `sanic_session/base.py:121-133` (fork) | The fork still accepts any client-chosen session ID. Session rotation on logon prevents fixation, but anonymous data such as `motd` is still stored under the attacker's ID. | Generate a new ID when the cookie's ID has no stored value. |
+| L-15 | `install-443-redirect.sh:7-11` | Breaks with more than one IPv4 address, redirects external traffic only, and appends a duplicate rule on every run. | Drop `--destination`; use `-C` before `-A`. |
+| L-DOC-1 | `README.md` | The README doesn't cover reverse-proxy settings (H-3). It says to run `start.sh` while also requiring TLS (M-3). It mentions Docker and compose, but there is no Dockerfile, only a `.dockerignore`. `.gitignore` has duplicate entries plus LaTeX and wine leftovers. | Add a "Running behind a proxy" section; align `start.sh`; drop the Docker mention or add a `Dockerfile`. |
 
 ---
 
 ## 4. Prioritized top 10
 
-1. **C-1.** Move `/auth/.../access/add|remove`, `/auth/rekey` and `/auth/deauth` to POST with CSRF protection, and have `verifyapi` validate the supplied key instead of falling back to the session. *(This is the one exploitable admin takeover.)*
-2. **H-1.** Rotate the session ID on logon, su and return, reject unknown session IDs in the sanic-session fork, and use a `__Host-` cookie.
-3. **H-2 and H-3.** Add rate limiting to every logon route. Make the challenge attempt counter atomic and stop resetting it. Run PAM and SMTP off the event loop.
-4. **H-4.** Stop shipping `--debug --host=0.0.0.0` as the default start script, and validate request bodies (return 400, not 500 with a traceback).
-5. **H-5.** Restrict su: no becoming admins, no leaking target API keys, no creating users. Enforce `verify()` in `/auth/return`, and log su events.
-6. **M-1.** Hash API keys at rest, move them out of URL paths into the `Authorization` header, and add expiry.
-7. **H-6 and M-3.** Make the backend modes explicit: guard every DB endpoint when MySQL is down, and fail fast instead of silently falling back to per-worker in-memory sessions.
-8. **M-13.** Pin dependencies (lock file, fork pinned to a commit), fix the fork's `setuptools<60` build pin and failing tests, and drop unused packages such as `mysqlclient`.
-9. **M-14.** Add a pytest and `sanic-testing` suite and CI covering the auth flows above, plus ruff.
-10. **M-6, M-10, M-4 and L-DOC-1.** Fix `env-example` (the `AUTH_DOMAIN` quote and the 404 path), document TLS, and expand the README with the endpoint-authoring guide, an environment variable reference and the first-admin bootstrap.
+1. **H-1.** Re-read access from the database in `verify()` (or version it), so revoking rights takes effect immediately.
+2. **H-3.** Document and set Sanic's proxy settings. Otherwise, behind the recommended proxy, one person can lock everyone out and HSTS is silently off.
+3. **H-2.** Validate request bodies (400, not 500) and stop shipping `--debug --host=0.0.0.0` as the default way to run.
+4. **M-1.** Log users on under the canonical database username, and make `sanic_info.user` case-sensitive.
+5. **M-3 and M-4.** Make the out-of-box run actually keep sessions: TLS or localhost in `start.sh`, and cap the memcache expiry so an `AUTH_VALID` over 30 days doesn't produce `Max-Age=0`.
+6. **M-6.** Audit-log access grants and removals, and decide what `admin/permissions` may grant.
+7. **M-5.** Choose the session backend explicitly and handle memcached outages without 500s on every page.
+8. **M-8.** Add a pytest and `sanic-testing` suite plus CI, seeded from the PR #1/#2 verification cases.
+9. **M-7.** Pin dependencies, pin and fix the sanic-session fork (build pin, tests, L-5, L-14), and drop unused packages.
+10. **M-2 and L-6.** Make blueprint registration all-or-nothing, and index `sanic_info.apikey`.
+
+---
+
+## 5. Status of findings from the first review
+
+| First review | Status | Notes |
+|---|---|---|
+| C-1 CSRF admin grant | **Fixed** (#2) | Verified: GETs return 405; a bogus key no longer falls back to the session; `SameSite=Strict`. |
+| H-1 Session fixation | **Fixed** (#1) | The ID is rotated on identity change and the cookie uses the `__Host-` prefix. The fork's acceptance of unknown IDs remains as L-14. |
+| H-2 Challenge brute force | **Fixed** (#1) | Attempts are counted atomically, rate limits added, and responses are the same for known and unknown users. The proxy caveat is now H-3. |
+| H-3 Blocking PAM/SMTP | **Fixed** (#1) | |
+| H-4 Debug mode and input 500s | **Open** | Now H-2. |
+| H-5 su rules | **Fixed** (#1) | |
+| H-6 No-DB crashes | **Fixed** (#2) | |
+| M-1 API keys | **Fixed** (#2) | Keys are hashed, expire and are shown once. Residual issues are in L-6. |
+| M-2 Swallowed access errors | **Fixed** (#2) | |
+| M-3 Session backend fallback | **Open** | Now M-5. |
+| M-4 Secure cookie over HTTP | **Partly fixed** | Documented in the README, but `start.sh` still contradicts it: M-3. |
+| M-5 Session lifetime | **Fixed** (#1) | The new edge case is M-4. |
+| M-6 `env-example` `AUTH_DOMAIN` | **Fixed** (#1) | |
+| M-7 `DB_AUTOCOMMIT` | **Fixed** (#1) | |
+| M-8 Pool nesting | **Fixed** (#2) | Verified with `DB_POOL_MAX=1`. |
+| M-9 Discovery | **Fixed** (#2) | The new partial-registration issue is M-2. |
+| M-10 Error pages | **Fixed** (#2) | No `500.html` is shipped: L-13. |
+| M-11 Security headers | **Fixed** (#2) | `'unsafe-inline'` remains: L-12. |
+| M-12 `shadow` and directory listing | **Open** | Now M-9. |
+| M-13 Dependencies | **Open** | Now M-7. |
+| M-14 Tests and CI | **Open** | Now M-8. |
+| L-1, L-2, L-3, L-8, L-9, L-10, L-11, L-13 | **Open** | Now L-1, L-2, L-3, L-4, L-9, L-10, L-11, L-15. |
+| L-4, L-5, L-6, L-7, L-12 | **Fixed** (#1) | |
+| L-14 (`MEMCACHED_PORT` as a string, a double probe) | **Open** | Folded into M-5. |
+| L-15 (error-page file handles) | **Fixed** (#2) | |
+| L-DOC-1 README | **Fixed** (#2) | The remaining gaps are in the new L-DOC-1. |
+| L-DOC-2, L-DOC-3 | **Open** | Folded into the new L-DOC-1. |
+
+**Corrections to the first review:**
+- `html/index.html` is a symlink to `html/logon/index.html`, not a copy.
+- The original evidence for the challenge race (a correct guess "succeeding as the 13th of 40") was not conclusive, because concurrent requests aren't processed in the order they are sent. The check-then-act weakness was real, and the fix in #1 was verified separately.
