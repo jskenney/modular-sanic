@@ -3,9 +3,11 @@
 from sanic import Sanic, response
 from sanic.exceptions import NotFound, ServerError
 from sanic.response import text, json, html, redirect, empty
+from sanic.log import logger
+from datetime import datetime, timezone
 from sanic_session import Session, MemcacheSessionInterface, InMemorySessionInterface
 import asyncio, aiomysql, aiomcache, pymemcache
-import pam, os, importlib.util, time, uuid, sys, environs
+import pam, os, importlib.util, time, uuid, sys, environs, hashlib
 
 ###############################################################################
 # Use environmental variables and the .env file for configuration settings
@@ -20,6 +22,9 @@ app.config.env = env
 ###############################################################################
 # Enable Session Support (Default to Memcached interface),
 # use in-memory model if Memcached is unavailable.
+# Stored sessions expire after AUTH_VALID seconds of inactivity, and the
+# __Host- cookie prefix stops other subdomains from planting a session cookie.
+session_expiry = app.config.env.int('AUTH_VALID', default=604800)
 try:
     test_client = pymemcache.client.base.Client((app.config.env.str('MEMCACHED_HOST', default='127.0.0.1'),
                                                  app.config.env.str('MEMCACHED_PORT', default='11211')))
@@ -27,11 +32,13 @@ try:
     test_client.close()
     client = aiomcache.Client(app.config.env.str('MEMCACHED_HOST', default='127.0.0.1'),
                               app.config.env.str('MEMCACHED_PORT', default='11211'))
-    Session(app, interface=MemcacheSessionInterface(client, samesite="Lax", secure=True))
+    Session(app, interface=MemcacheSessionInterface(client, samesite="Lax", secure=True,
+                                                     cookie_name="__Host-session", expiry=session_expiry))
     print("Notice: Using Memcached Session Handling")
     app.config.MEMCACHEAVAIL = True
 except Exception as e:
-    Session(app, interface=InMemorySessionInterface(samesite="Lax", secure=True))
+    Session(app, interface=InMemorySessionInterface(samesite="Lax", secure=True,
+                                                    cookie_name="__Host-session", expiry=session_expiry))
     print(f"Notice: Memcached connection failed: {type(e).__name__} | Message: {e}")
     print("Notice: Using InMemory Session Handling")
     app.config.MEMCACHEAVAIL = False
@@ -122,7 +129,7 @@ async def setup_db(app):
             user=app.config.env.str(       'DB_USER', default='username'),
             password=app.config.env.str(   'DB_PASS', default='password'),
             db=app.config.env.str(         'DB_NAME', default='dbname'),
-            autocommit=app.config.env.bool('DB_AUTOCOMMIT', default=True)
+            autocommit=True
         )
         app.config.MYSQLAVAIL = True
         print("Notice: Database connection pool created.")
@@ -143,10 +150,70 @@ async def close_db(app):
 # access information from the MySQL database's
 # sanic_info, sanic_access, and sanic_challenge tables.
 class AuthVerification:
+    # Session keys that hold the logged on identity
+    AUTH_KEYS = ('user', 'visit', 'logon_at', 'access', 'info', 'apikey', 'original_user')
+    def __init__(self):
+        self.attempts = {}
+    # A session is expired when idle longer than AUTH_VALID, or older than AUTH_MAX since logon
+    def _session_expired(self, request):
+        session = request.ctx.session
+        now = time.time()
+        return (not session.get('user') or not session.get('visit') or not session.get('logon_at')
+                or now - session.get('visit') > request.app.config.env.int('AUTH_VALID', default=604800)
+                or now - session.get('logon_at') > request.app.config.env.int('AUTH_MAX', default=2592000))
+    # Remove only the authentication values, leaving other session data in place
+    def _clear_auth(self, request):
+        for key in self.AUTH_KEYS:
+            request.ctx.session.pop(key, None)
+    # Issue a new session id whenever the logged on identity changes, so a
+    # session id planted before logon (session fixation) is never authenticated.
+    async def _rotate_session(self, request, user):
+        session = request.ctx.session
+        # Drop any stale identity first so an expired session starts a fresh logon
+        if self._session_expired(request):
+            self._clear_auth(request)
+        if session.get('user') == user:
+            return
+        if not session.get('user'):
+            session['logon_at'] = time.time()
+        interface = request.app.ctx.extensions['session'].interface
+        await interface._delete_key(interface.prefix + session.sid)
+        session.sid = uuid.uuid4().hex
+        session.modified = True
+    # Count one attempt against a fixed window, returns True once over the limit.
+    # Memcached shares the counts between workers, otherwise they are per worker.
+    async def _count_attempt(self, request, key, limit, window):
+        key = 'ratelimit:' + hashlib.sha256(key.encode()).hexdigest()
+        if request.app.config.MEMCACHEAVAIL:
+            try:
+                await request.app.ctx.mc.add(key.encode(), b'0', exptime=window)
+                count = await request.app.ctx.mc.incr(key.encode())
+                return count is not None and count > limit
+            except Exception as e:
+                logger.warning(f"Rate limit check failed: {type(e).__name__} | Message: {e}")
+                return False
+        now = time.time()
+        if len(self.attempts) > 10000:
+            self.attempts = {k: v for k, v in self.attempts.items() if now - v[0] <= window}
+        start, count = self.attempts.get(key, (now, 0))
+        if now - start > window:
+            start, count = now, 0
+        self.attempts[key] = (start, count + 1)
+        return count + 1 > limit
+    # Rate limit authentication attempts by client address and (optionally) username
+    async def throttled(self, request, bucket, username=None):
+        limit = request.app.config.env.int('AUTH_RATE_LIMIT', default=10)
+        window = request.app.config.env.int('AUTH_RATE_WINDOW', default=300)
+        over = await self._count_attempt(request, f'{bucket}:ip:{request.remote_addr or request.ip}', limit, window)
+        if username is not None:
+            over = await self._count_attempt(request, f'{bucket}:user:{username}', limit, window) or over
+        if over:
+            logger.warning(f"Rate limit exceeded: bucket={bucket} ip={request.remote_addr or request.ip} user={username}")
+        return over
     # Verify User's Status by _ONLY_ checking session information
     async def verify(self, request):
-        if not request.ctx.session.get('user') or not request.ctx.session.get('visit') or time.time() - request.ctx.session.get('visit') > request.app.config.env.int('AUTH_VALID', default=604800):
-            await self.logoff(request)
+        if self._session_expired(request):
+            self._clear_auth(request)
             return False, None, None, {}, {}
         access = request.ctx.session.get('access')
         info = request.ctx.session.get('info')
@@ -156,7 +223,7 @@ class AuthVerification:
         return True, username, apikey, access, info
     # Verify User's Status by Checkinging Session then MySQL Database
     async def verifyapi(self, request, mykey):
-        if not request.ctx.session.get('user') or not request.ctx.session.get('visit') or time.time() - request.ctx.session.get('visit') > request.app.config.env.int('AUTH_VALID', default=604800):
+        if self._session_expired(request):
             async with request.app.ctx.pool.acquire() as conn:
                 async with conn.cursor(aiomysql.DictCursor) as cur:
                     query = 'SELECT user FROM sanic_info WHERE apikey=%s'
@@ -248,6 +315,7 @@ class AuthVerification:
     # Otherwise they can be set from the function.
     async def logon(self, request, user, access={}, info='', apikey='', forceNoMySQL=False):
         if not app.config.MYSQLAVAIL or forceNoMySQL:
+            await self._rotate_session(request, user)
             request.ctx.session['apikey'] = apikey
             request.ctx.session['access'] = access
             request.ctx.session['info'] = info
@@ -277,6 +345,11 @@ class AuthVerification:
                     if row['access'] not in access:
                         access[row['access']] = []
                     access[row['access']].append(row['value'])
+                # While switched to another user (su), never expose that user's API key
+                if request.ctx.session.get('original_user'):
+                    apikey = ''
+                    info = {k: v for k, v in info.items() if k != 'apikey'}
+                await self._rotate_session(request, user)
                 request.ctx.session['apikey'] = apikey
                 request.ctx.session['access'] = access
                 request.ctx.session['info'] = info
@@ -284,7 +357,16 @@ class AuthVerification:
                 request.ctx.session['visit'] = time.time()
                 return user, apikey, info, access
 
+###############################################################################
+# Standard JSON response envelope used by the endpoints
+def reply(request, success, data, status=200, error=None):
+    body = {'success': success, 'sent': datetime.now(timezone.utc).isoformat(), 'endpoint': request.path, 'data': data}
+    if error:
+        body['error'] = error
+    return json(body, status=status)
+
 @app.listener('before_server_start')
 async def setup_auth(app):
     app.ctx.auth = AuthVerification()
+    app.ctx.reply = reply
     app.ctx.pam = pam.pam()
