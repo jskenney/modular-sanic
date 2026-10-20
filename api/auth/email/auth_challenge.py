@@ -1,7 +1,6 @@
-from sanic import Blueprint, response
-from sanic_ext import openapi
-import asyncio, aiomysql
-import time, re, secrets
+from sanic import Blueprint
+import aiomysql
+import secrets
 
 sub_bp = Blueprint("auth_challenge_option", url_prefix="/auth")
 
@@ -13,10 +12,11 @@ async def system_challenge(request):
     unavailable = request.app.ctx.auth.db_unavailable(request)
     if unavailable:
         return unavailable
-    data = request.json
-    user = data['username']
-    token = str(data['challenge'])
-    failed = {'username': None, 'apikey': '', 'access': {}, 'info': {}, 'redirect': request.app.config.env.str('REDIRECT_LOGON_FAILED', default='/logon/logon.html')}
+    fields = request.app.ctx.auth.json_fields(request, 'username', 'challenge')
+    if fields is None:
+        return request.app.ctx.auth.bad_request(request, 'username', 'challenge')
+    user, token = fields
+    failed = {'username': None, 'apikey': '', 'access': {}, 'info': {}, 'redirect': request.app.ctx.auth.setting(request, 'REDIRECT_LOGON_FAILED')}
     if await request.app.ctx.auth.throttled(request, 'logon', user):
         return request.app.ctx.reply(request, False, failed, status=429, error="Too many attempts, please wait and try again.")
     await request.app.ctx.auth.logoff(request)
@@ -39,5 +39,5 @@ async def system_challenge(request):
             await cur.execute(query, values)
     # Log on after the connection is returned, logon() uses its own connection
     user, apikey, info, access = await request.app.ctx.auth.logon(request, user)
-    res = request.app.ctx.reply(request, True, {'username': user, 'apikey': apikey, 'access': access, 'info': info, 'redirect': request.app.config.env.str('REDIRECT_LOGON_SUCCESSFUL', default='/index.html')})
+    res = request.app.ctx.reply(request, True, {'username': user, 'apikey': apikey, 'access': access, 'info': info, 'redirect': request.app.ctx.auth.setting(request, 'REDIRECT_LOGON_SUCCESSFUL')})
     return res

@@ -1,9 +1,9 @@
-from sanic import Blueprint, response
+from sanic import Blueprint
 from sanic.log import logger
-from sanic_ext import openapi
 import asyncio, aiomysql
-import time, secrets
+import secrets
 import smtplib
+from urllib.parse import quote
 from email.message import EmailMessage
 
 sub_bp = Blueprint("auth_challenge_response", url_prefix="/auth/request/challenge")
@@ -20,9 +20,11 @@ async def system_request_challenge(request):
     unavailable = request.app.ctx.auth.db_unavailable(request)
     if unavailable:
         return unavailable
-    data = request.json
-    username = data['username']
-    redirect = request.app.config.env.str(              'CHALLENGE_PAGE',    default='/logon/challenge.html') +'?user='+username
+    fields = request.app.ctx.auth.json_fields(request, 'username')
+    if fields is None:
+        return request.app.ctx.auth.bad_request(request, 'username')
+    username, = fields
+    redirect = request.app.ctx.auth.setting(request, 'CHALLENGE_PAGE') + '?user=' + quote(username)
     if await request.app.ctx.auth.throttled(request, 'challenge', username):
         return request.app.ctx.reply(request, False, {'redirect': redirect}, status=429, error="Too many attempts, please wait and try again.")
     # Generate a Token (7 digits)
@@ -44,12 +46,12 @@ async def system_request_challenge(request):
     if ok:
         message = "Please enter the following into the challenge box provided on the website\n\n"+token+"\n\n"
         msg = EmailMessage()
-        msg['Subject'] =     request.app.config.env.str('AUTH_TITLE',        default='SanicApp')+' Logon Request'
-        msg['From'] =        request.app.config.env.str('AUTH_EMAILER',      default='noreply@example.com')
-        msg['To'] = username + '@' + request.app.config.env.str('AUTH_DOMAIN', default='example.com').lstrip('@')
+        msg['Subject'] =     request.app.ctx.auth.setting(request, 'AUTH_TITLE')+' Logon Request'
+        msg['From'] =        request.app.ctx.auth.setting(request, 'AUTH_EMAILER')
+        msg['To'] = username + '@' + request.app.ctx.auth.setting(request, 'AUTH_DOMAIN').lstrip('@')
         msg.set_content(message)
         try:
-            await asyncio.to_thread(send_email, request.app.config.env.str('AUTH_EMAIL_SERVER', default='localhost'), msg)
+            await asyncio.to_thread(send_email, request.app.ctx.auth.setting(request, 'AUTH_EMAIL_SERVER'), msg)
         except (smtplib.SMTPException, OSError) as e:
             logger.error(f"Unable to send challenge email: {type(e).__name__} | Message: {e}")
             return request.app.ctx.reply(request, False, {'redirect': redirect}, status=503, error="Unable to send the challenge email, please try again later.")
