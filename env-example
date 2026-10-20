@@ -7,6 +7,13 @@ API_LOCATIONS=api/auth/general,api/auth/switchuser,api/auth/pam,api/auth/apikey,
 # Content-Security-Policy for every page except /docs (empty to disable)
 #CONTENT_SECURITY_POLICY=default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'
 #REFERRER_POLICY=strict-origin-when-cross-origin
+
+# Reverse proxy settings (read by Sanic itself).  Behind a proxy such as nginx
+# or caddy, set one of these so client addresses (used for rate limiting) and
+# HTTPS (used for HSTS) are taken from the proxy's forwarded headers.
+#SANIC_PROXIES_COUNT=1
+#SANIC_REAL_IP_HEADER=x-real-ip
+#SANIC_FORWARDED_SECRET=a-shared-secret
 #DOCUMENTATION=False
 SHOW_SITE_CONTENTS=True
 
@@ -59,6 +66,11 @@ AUTH_RATE_WINDOW=300
 SAMESITE=Strict
 # API keys expire this many seconds after they are generated (0 for never)
 APIKEY_VALID=31536000
+# Generating an API key requires a logon within this many seconds
+AUTH_REKEY_WINDOW=900
+# Seconds a session may reuse its access before re-reading it from the
+# database (0 re-reads it on every request, so changes apply immediately)
+ACCESS_CACHE_SECONDS=0
 # PAM service used for /auth/pam (e.g. a service restricted to an allowed group)
 PAM_SERVICE=login
 # Sign on Banner / Consent Banner

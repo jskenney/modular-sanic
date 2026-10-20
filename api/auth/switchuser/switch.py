@@ -1,8 +1,5 @@
-from sanic import Blueprint, response
+from sanic import Blueprint
 from sanic.log import logger
-from sanic_ext import openapi
-import asyncio, aiomysql
-import time, re
 
 sub_bp = Blueprint("auth_switch", url_prefix="/auth")
 
@@ -16,20 +13,20 @@ async def system_su_return(request):
     original = request.ctx.session.get('original_user') if ok else None
     if not original:
         if ok:
-            res = request.app.ctx.reply(request, False, {'username': username, 'apikey': apikey, 'access': access, 'info': info, 'redirect': request.app.config.env.str('REDIRECT_LOGON_SUCCESSFUL', default="/index.html")}, status=400)
+            res = request.app.ctx.reply(request, False, {'username': username, 'apikey': apikey, 'access': access, 'info': info, 'redirect': request.app.ctx.auth.setting(request, 'REDIRECT_LOGON_SUCCESSFUL')}, status=400)
         else:
-            res = request.app.ctx.reply(request, False, {'username': username, 'apikey': apikey, 'access': access, 'info': info, 'redirect': request.app.config.env.str('REDIRECT_LOGON_FAILED', default="/logon/logon.html")}, status=401)
+            res = request.app.ctx.reply(request, False, {'username': username, 'apikey': apikey, 'access': access, 'info': info, 'redirect': request.app.ctx.auth.setting(request, 'REDIRECT_LOGON_FAILED')}, status=401)
         return res
     # The original user must still be allowed to switch users, otherwise log off entirely
     _, _, _, original_access = await request.app.ctx.auth.access_show(request, original)
     if 'admin' not in original_access or 'become' not in original_access['admin']:
         logger.warning(f"su return refused: {original} no longer has admin/become (was {username}) from {request.remote_addr or request.ip}")
         await request.app.ctx.auth.logoff(request)
-        return request.app.ctx.reply(request, False, {'username': None, 'apikey': None, 'access': {}, 'info': {}, 'redirect': request.app.config.env.str('REDIRECT_LOGON_FAILED', default="/logon/logon.html")}, status=403)
+        return request.app.ctx.reply(request, False, {'username': None, 'apikey': None, 'access': {}, 'info': {}, 'redirect': request.app.ctx.auth.setting(request, 'REDIRECT_LOGON_FAILED')}, status=403)
     del(request.ctx.session['original_user'])
     user, apikey, info, access = await request.app.ctx.auth.logon(request, original)
     logger.info(f"su return: {username} -> {original} from {request.remote_addr or request.ip}")
-    res = request.app.ctx.reply(request, True, {'username': user, 'apikey': apikey, 'access': access, 'info': info, 'redirect': request.app.config.env.str('REDIRECT_LOGON_SUCCESSFUL', default="/index.html")})
+    res = request.app.ctx.reply(request, True, {'username': user, 'apikey': apikey, 'access': access, 'info': info, 'redirect': request.app.ctx.auth.setting(request, 'REDIRECT_LOGON_SUCCESSFUL')})
     return res
 
 # Switch Users (assuming admin access)
@@ -39,7 +36,7 @@ async def system_su(request):
     Switch to another user, works when you are an admin with become access
     """
     ok, username, apikey, access, info = await request.app.ctx.auth.verify(request)
-    failed = {'username': username, 'apikey': apikey, 'access': access, 'info': info, 'redirect': request.app.config.env.str('REDIRECT_LOGON_SUCCESSFUL', default="/index.html")}
+    failed = {'username': username, 'apikey': apikey, 'access': access, 'info': info, 'redirect': request.app.ctx.auth.setting(request, 'REDIRECT_LOGON_SUCCESSFUL')}
     if not ok:
         return request.app.ctx.reply(request, False, failed, status=401)
     if 'admin' not in access or 'become' not in access['admin']:
@@ -61,5 +58,5 @@ async def system_su(request):
         request.ctx.session['original_user'] = username
     user, apikey, info, access = await request.app.ctx.auth.logon(request, target_info['user'])
     logger.info(f"su: {username} -> {user} (original user {request.ctx.session.get('original_user')}) from {request.remote_addr or request.ip}")
-    res = request.app.ctx.reply(request, True, {'username': user, 'apikey': apikey, 'access': access, 'info': info, 'redirect': request.app.config.env.str('REDIRECT_LOGON_SUCCESSFUL', default="/index.html")})
+    res = request.app.ctx.reply(request, True, {'username': user, 'apikey': apikey, 'access': access, 'info': info, 'redirect': request.app.ctx.auth.setting(request, 'REDIRECT_LOGON_SUCCESSFUL')})
     return res

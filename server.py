@@ -1,13 +1,14 @@
 ###############################################################################
 # Import Required Python Libraries
-from sanic import Sanic, Blueprint, response
+from sanic import Sanic, Blueprint
 from sanic.exceptions import NotFound, SanicException
-from sanic.response import text, json, html, redirect, empty
+from sanic.response import json, html
 from sanic.log import logger
 from datetime import datetime, timezone
+from urllib.parse import urlsplit
 from sanic_session import Session, MemcacheSessionInterface, InMemorySessionInterface
-import asyncio, aiomysql, aiomcache, pymemcache
-import pam, os, importlib.util, time, uuid, sys, environs, hashlib, re
+import aiomysql, aiomcache, pymemcache
+import os, importlib.util, time, uuid, sys, environs, hashlib, re, base64
 import pymysql
 
 ###############################################################################
@@ -26,8 +27,26 @@ app.config.env = env
 # Stored sessions expire after AUTH_VALID seconds of inactivity, and the
 # __Host- cookie prefix stops other subdomains from planting a session cookie.
 # SameSite=Strict (the default) keeps the cookie off all cross-site requests.
-session_expiry = app.config.env.int('AUTH_VALID', default=604800)
+# Memcached cannot hold entries longer than 30 days, so the stored session is
+# capped there; verify() still enforces AUTH_VALID itself.
+session_expiry = min(app.config.env.int('AUTH_VALID', default=604800), 2592000)
 session_samesite = app.config.env.str('SAMESITE', default='Strict')
+
+# Only write the session back (and re-send the cookie) when it changed, so
+# static files and unchanged requests do not rewrite memcached every time.
+class SaveWhenModified:
+    async def save(self, request, response):
+        session = getattr(request.ctx, self.session_name, None)
+        if session is not None and not session.modified:
+            return
+        await super().save(request, response)
+
+class MemcacheSessions(SaveWhenModified, MemcacheSessionInterface):
+    pass
+
+class InMemorySessions(SaveWhenModified, InMemorySessionInterface):
+    pass
+
 try:
     test_client = pymemcache.client.base.Client((app.config.env.str('MEMCACHED_HOST', default='127.0.0.1'),
                                                  app.config.env.str('MEMCACHED_PORT', default='11211')))
@@ -35,13 +54,13 @@ try:
     test_client.close()
     client = aiomcache.Client(app.config.env.str('MEMCACHED_HOST', default='127.0.0.1'),
                               app.config.env.str('MEMCACHED_PORT', default='11211'))
-    Session(app, interface=MemcacheSessionInterface(client, samesite=session_samesite, secure=True,
-                                                     cookie_name="__Host-session", expiry=session_expiry))
+    Session(app, interface=MemcacheSessions(client, samesite=session_samesite, secure=True,
+                                            cookie_name="__Host-session", expiry=session_expiry))
     print("Notice: Using Memcached Session Handling")
     app.config.MEMCACHEAVAIL = True
 except Exception as e:
-    Session(app, interface=InMemorySessionInterface(samesite=session_samesite, secure=True,
-                                                    cookie_name="__Host-session", expiry=session_expiry))
+    Session(app, interface=InMemorySessions(samesite=session_samesite, secure=True,
+                                            cookie_name="__Host-session", expiry=session_expiry))
     print(f"Notice: Memcached connection failed: {type(e).__name__} | Message: {e}")
     print("Notice: Using InMemory Session Handling")
     app.config.MEMCACHEAVAIL = False
@@ -101,18 +120,38 @@ if app.config.env.str('HSTS', default=''):
             response.headers["Strict-Transport-Security"] = hsts_value
 
 ###############################################################################
-# Browser security headers.  The bundled pages use inline scripts and styles,
-# so the default policy allows those; set CONTENT_SECURITY_POLICY to tighten
-# it, or to an empty value to disable it.  The generated API documentation
-# loads its own scripts, so it is left without a policy.
+# Browser security headers.  The default Content-Security-Policy only allows
+# scripts from this site plus the inline scripts found (at startup) in the
+# HTML directory and the error pages, by their SHA-256 hash; restart after
+# changing an inline script.  Set CONTENT_SECURITY_POLICY to replace the
+# policy, or to an empty value to disable it.  The generated API
+# documentation loads its own scripts, so it is left without a policy.
+def inline_script_hashes(*locations):
+    hashes = set()
+    pattern = re.compile(r'<script(?![^>]*\bsrc\s*=)[^>]*>(.*?)</script>', re.S | re.I)
+    files = set()
+    for location in locations:
+        if os.path.isfile(location):
+            files.add(os.path.realpath(location))
+        for root, _, filenames in os.walk(location):
+            files.update(os.path.realpath(os.path.join(root, f)) for f in filenames if f.endswith(('.html', '.htm')))
+    for filename in sorted(files):
+        with open(filename, encoding='utf-8', errors='replace') as f:
+            for script in pattern.findall(f.read()):
+                digest = hashlib.sha256(script.encode()).digest()
+                hashes.add("'sha256-" + base64.b64encode(digest).decode() + "'")
+    return sorted(hashes)
+
 security_headers = {
     'X-Content-Type-Options': 'nosniff',
     'X-Frame-Options': 'DENY',
     'Referrer-Policy': app.config.env.str('REFERRER_POLICY', default='strict-origin-when-cross-origin'),
 }
 content_security_policy = app.config.env.str('CONTENT_SECURITY_POLICY', default=
-    "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; "
-    "img-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'")
+    "default-src 'self'; script-src 'self' " +
+    ' '.join(inline_script_hashes(app.config.env.str('HTML', default='./html/'), page_404, page_500)) +
+    "; style-src 'self' 'unsafe-inline'; img-src 'self' data:; object-src 'none'; base-uri 'self'; "
+    "form-action 'self'; frame-ancestors 'none'")
 @app.middleware("response")
 async def add_security_headers(request, res):
     for header, value in security_headers.items():
@@ -121,6 +160,29 @@ async def add_security_headers(request, res):
     if content_security_policy and not request.path.startswith(getattr(request.app.config, 'OAS_URL_PREFIX', '/docs')):
         if 'Content-Security-Policy' not in res.headers:
             res.headers['Content-Security-Policy'] = content_security_policy
+
+###############################################################################
+# Configuration warnings that only show up with real traffic (logged once
+# per worker): forwarded headers from a reverse proxy that Sanic has not been
+# told to trust (so every client shares one address for rate limiting and
+# HTTPS is not detected), and plain HTTP from another host (the Secure
+# session cookie is not stored, so logons do not stick).
+proxy_configured = any(app.config.get(k) for k in ('PROXIES_COUNT', 'REAL_IP_HEADER', 'FORWARDED_SECRET'))
+config_warnings = set()
+@app.middleware("request")
+async def warn_about_configuration(request):
+    if len(config_warnings) == 2:
+        return
+    if not proxy_configured and 'proxy' not in config_warnings and (
+            'x-forwarded-for' in request.headers or 'forwarded' in request.headers):
+        config_warnings.add('proxy')
+        logger.warning("Forwarded headers received but no proxy is configured: set SANIC_PROXIES_COUNT "
+                       "(or SANIC_REAL_IP_HEADER / SANIC_FORWARDED_SECRET) so client addresses and HTTPS are detected.")
+    if 'http' not in config_warnings and request.scheme == 'http' and request.host and \
+            urlsplit('//' + request.host).hostname not in ('localhost', '127.0.0.1', '::1'):
+        config_warnings.add('http')
+        logger.warning(f"Plain HTTP request for {request.host}: browsers only keep the Secure session cookie "
+                       "over HTTPS (or on localhost), so logons will not stick.  Use TLS.")
 
 ###############################################################################
 # Lets try autodiscovery of Endpoints (authentication APIs and site APIs)
@@ -156,11 +218,19 @@ for source in (app.config.env.list('API_LOCATIONS', default=['./api', './externa
                     del sys.modules[name]
                     print("Notice: Skipped", filename, "(no sub_bp Blueprint defined)")
                     continue
-                app.blueprint(bp.sub_bp)
-                print("Notice: Loaded blueprint from", filename)
+                if bp.sub_bp.name in app.blueprints:
+                    raise ValueError(f'A blueprint named "{bp.sub_bp.name}" is already loaded, blueprint names must be unique.')
             except Exception as e:
                 sys.modules.pop(name, None)
                 logger.error(f"Failed to load blueprint from {filename}: {type(e).__name__} | Message: {e}", exc_info=e)
+                continue
+            # A route clash leaves some of the blueprint's routes registered and
+            # they cannot be removed again, so stop rather than run half loaded.
+            try:
+                app.blueprint(bp.sub_bp)
+            except Exception as e:
+                raise RuntimeError(f"Unable to register the blueprint from {filename}: {e}") from e
+            print("Notice: Loaded blueprint from", filename)
 
 ###############################################################################
 # Configure and connect to memcached.
@@ -213,13 +283,45 @@ async def close_db(app):
 # sanic_info, sanic_access, and sanic_challenge tables.
 class AuthVerification:
     # Session keys that hold the logged on identity
-    AUTH_KEYS = ('user', 'visit', 'logon_at', 'access', 'info', 'apikey', 'original_user')
+    AUTH_KEYS = ('user', 'visit', 'logon_at', 'access', 'info', 'apikey', 'original_user', 'access_at', 'access_manual')
     # API key values that mean "use the web session instead of a key"
     SESSION_KEYS = ('session', '-', '')
-    # SQL condition for an API key that has not expired
-    KEY_VALID = '(apikey_expires IS NULL OR apikey_expires > NOW())'
+    # Defaults for the page and email settings used by the endpoints
+    SETTINGS = {
+        'REDIRECT_LOGON_SUCCESSFUL': '/index.html',
+        'REDIRECT_LOGON_FAILED': '/logon/logon.html',
+        'REDIRECT_LOGOFF': '/index.html',
+        'CHALLENGE_PAGE': '/logon/challenge.html',
+        'LOGON_LOGO': '/logon/logo.webp',
+        'AUTH_MESSAGE': '',
+        'AUTH_TITLE': 'SanicApp',
+        'AUTH_EMAILER': 'noreply@example.com',
+        'AUTH_DOMAIN': 'example.com',
+        'AUTH_EMAIL_SERVER': 'localhost',
+        'PAM_SERVICE': 'login',
+    }
     def __init__(self):
         self.attempts = {}
+    # A page or email setting, from the environment or its default
+    def setting(self, request, name):
+        return request.app.config.env.str(name, default=self.SETTINGS[name])
+    # Required values from a JSON object body, as strings (numbers are accepted
+    # and converted); returns None when the body or any value is missing or invalid
+    @staticmethod
+    def json_fields(request, *names):
+        data = request.json
+        if not isinstance(data, dict):
+            return None
+        values = []
+        for name in names:
+            value = data.get(name)
+            if isinstance(value, bool) or not isinstance(value, (str, int)) or str(value) == '':
+                return None
+            values.append(str(value))
+        return tuple(values)
+    # 400 response for a request body without the required values
+    def bad_request(self, request, *names):
+        return reply(request, False, {}, status=400, error="The request must be a JSON object with: " + ", ".join(names) + ".")
     # API keys are stored as a SHA-256 hash, only the user ever sees the key itself
     @staticmethod
     def hashkey(apikey):
@@ -228,6 +330,17 @@ class AuthVerification:
     @staticmethod
     def _public_info(row):
         return {k: (v.isoformat() if isinstance(v, datetime) else v) for k, v in row.items() if k != 'apikey'}
+    # Load a user's sanic_info row (public form) and access dict with an open cursor
+    async def _load_user(self, cur, user):
+        await cur.execute('SELECT * FROM sanic_info WHERE user = %s', (user,))
+        rows = await cur.fetchall()
+        if len(rows) == 0:
+            return None, {}
+        await cur.execute('SELECT access, value FROM sanic_access WHERE user = %s ORDER BY access, value', (user,))
+        access = {}
+        for row in await cur.fetchall():
+            access.setdefault(row['access'], []).append(row['value'])
+        return self._public_info(rows[0]), access
     # Returns a 503 response when the database is unavailable, otherwise None
     def db_unavailable(self, request):
         if request.app.config.MYSQLAVAIL:
@@ -244,6 +357,11 @@ class AuthVerification:
     def _clear_auth(self, request):
         for key in self.AUTH_KEYS:
             request.ctx.session.pop(key, None)
+    # Set a session value only when it changes, so unchanged sessions are not saved
+    @staticmethod
+    def _set(session, key, value):
+        if session.get(key) != value:
+            session[key] = value
     # Issue a new session id whenever the logged on identity changes, so a
     # session id planted before logon (session fixation) is never authenticated.
     async def _rotate_session(self, request, user):
@@ -289,17 +407,28 @@ class AuthVerification:
         if over:
             logger.warning(f"Rate limit exceeded: bucket={bucket} ip={request.remote_addr or request.ip} user={username}")
         return over
-    # Verify User's Status by _ONLY_ checking session information
+    # Verify User's Status by checking the session.  With MySQL available the
+    # user's access and info are re-read from the database (at most every
+    # ACCESS_CACHE_SECONDS), so granted or revoked access applies right away;
+    # access set by logon(..., forceNoMySQL=True) is left as it was given.
     async def verify(self, request):
+        session = request.ctx.session
         if self._session_expired(request):
             self._clear_auth(request)
             return False, None, None, {}, {}
-        access = request.ctx.session.get('access')
-        info = request.ctx.session.get('info')
-        apikey = request.ctx.session.get('apikey')
-        username = request.ctx.session.get('user')
-        request.ctx.session['visit'] = time.time()
-        return True, username, apikey, access, info
+        now = time.time()
+        if request.app.config.MYSQLAVAIL and not session.get('access_manual') and now - session.get('access_at', 0) >= request.app.config.env.int('ACCESS_CACHE_SECONDS', default=0):
+            async with request.app.ctx.pool.acquire() as conn:
+                async with conn.cursor(aiomysql.DictCursor) as cur:
+                    info, access = await self._load_user(cur, session['user'])
+            self._set(session, 'access', access)
+            self._set(session, 'info', info or {})
+            if request.app.config.env.int('ACCESS_CACHE_SECONDS', default=0) > 0:
+                session['access_at'] = now
+        # The idle timer only needs minute resolution, which keeps session writes down
+        if now - session.get('visit') >= 60:
+            session['visit'] = now
+        return True, session.get('user'), session.get('apikey'), session.get('access'), session.get('info')
     # Verify User's Status by API key, the key comes from an Authorization: Bearer
     # header when one is sent, otherwise from mykey (e.g. the URL).  A key of
     # 'session', '-' or '' checks the web session only; any other key is checked
@@ -314,7 +443,7 @@ class AuthVerification:
             return False, None, None, {}, {}
         async with request.app.ctx.pool.acquire() as conn:
             async with conn.cursor(aiomysql.DictCursor) as cur:
-                query = 'SELECT user FROM sanic_info WHERE apikey=%s AND ' + self.KEY_VALID
+                query = 'SELECT user FROM sanic_info WHERE apikey=%s AND (apikey_expires IS NULL OR apikey_expires > NOW())'
                 values = (self.hashkey(mykey),)
                 await cur.execute(query, values)
                 info = await cur.fetchall()
@@ -329,7 +458,7 @@ class AuthVerification:
     # returned here is the only time it is available.  Keys expire after
     # APIKEY_VALID seconds (0 for never).
     async def genapikey(self, request, user):
-        if not app.config.MYSQLAVAIL:
+        if not request.app.config.MYSQLAVAIL:
             return None
         valid = request.app.config.env.int('APIKEY_VALID', default=31536000)
         async with request.app.ctx.pool.acquire() as conn:
@@ -346,7 +475,7 @@ class AuthVerification:
     # Update Access Information, requires MySQL.  Returns True when added,
     # False for an unknown user or an access that is already present.
     async def access_add(self, request, user, access, value):
-        if not app.config.MYSQLAVAIL:
+        if not request.app.config.MYSQLAVAIL:
             return False
         async with request.app.ctx.pool.acquire() as conn:
             async with conn.cursor(aiomysql.DictCursor) as cur:
@@ -360,7 +489,7 @@ class AuthVerification:
                 return True
     # Delete Access Information, requires MySQL.  Returns True when removed.
     async def access_del(self, request, user, access, value):
-        if not app.config.MYSQLAVAIL:
+        if not request.app.config.MYSQLAVAIL:
             return False
         async with request.app.ctx.pool.acquire() as conn:
             async with conn.cursor(aiomysql.DictCursor) as cur:
@@ -370,76 +499,50 @@ class AuthVerification:
                 return cur.rowcount > 0
     # Show a user's access (via MySQL, or for the current user only, via session)
     async def access_show(self, request, user):
-        if not app.config.MYSQLAVAIL:
+        if not request.app.config.MYSQLAVAIL:
             ok, username, apikey, access, info = await self.verify(request)
             if not ok or username != user:
                 return user, '', {}, {}
             return user, apikey, info, access
-        info = {}
-        access = {}
-        apikey = ''
         async with request.app.ctx.pool.acquire() as conn:
             async with conn.cursor(aiomysql.DictCursor) as cur:
-                query = 'SELECT * FROM sanic_info WHERE user = %s'
-                values = (user,)
-                await cur.execute(query, values)
-                info = await cur.fetchall()
-                if len(info) == 0:
-                    return user, apikey, info, access
-                info = self._public_info(info[0])
-                query3 = 'SELECT access, value FROM sanic_access WHERE user = %s'
-                values3 = (user,)
-                await cur.execute(query3, values3)
-                x = await cur.fetchall()
-                for row in x:
-                    if row['access'] not in access:
-                        access[row['access']] = []
-                    access[row['access']].append(row['value'])
-                return user, apikey, info, access
+                info, access = await self._load_user(cur, user)
+        if info is None:
+            return user, '', [], {}
+        return info['user'], '', info, access
     # Log on a user, if MySQL is available use the database to provide access levels
-    # Otherwise they can be set from the function.
-    async def logon(self, request, user, access={}, info='', apikey='', forceNoMySQL=False):
-        if not app.config.MYSQLAVAIL or forceNoMySQL:
+    # Otherwise they can be set from the function.  With MySQL the session
+    # holds the user name exactly as stored in sanic_info.
+    async def logon(self, request, user, access=None, info='', apikey='', forceNoMySQL=False):
+        if access is None:
+            access = {}
+        if not request.app.config.MYSQLAVAIL or forceNoMySQL:
             await self._rotate_session(request, user)
             request.ctx.session['apikey'] = apikey
             request.ctx.session['access'] = access
             request.ctx.session['info'] = info
             request.ctx.session['user'] = user
             request.ctx.session['visit'] = time.time()
+            request.ctx.session['access_manual'] = True
             return user, apikey, info, access
-        info = {}
-        access = {}
         apikey = ''
         async with request.app.ctx.pool.acquire() as conn:
             async with conn.cursor(aiomysql.DictCursor) as cur:
-                query = 'SELECT * FROM sanic_info WHERE user = %s'
-                values = (user,)
-                await cur.execute(query, values)
-                info = await cur.fetchall()
+                info, access = await self._load_user(cur, user)
                 # First logon creates the user's row (API keys are only made by /auth/rekey)
-                if len(info) == 0:
-                    await cur.execute('INSERT INTO sanic_info (user) VALUES (%s) ON DUPLICATE KEY UPDATE user=user', values)
-                    await cur.execute(query, values)
-                    info = await cur.fetchall()
-                info = self._public_info(info[0])
-                query3 = 'SELECT access, value FROM sanic_access WHERE user = %s'
-                values3 = (user,)
-                await cur.execute(query3, values3)
-                x = await cur.fetchall()
-                for row in x:
-                    if row['access'] not in access:
-                        access[row['access']] = []
-                    access[row['access']].append(row['value'])
-                # While switched to another user (su), never expose that user's API key
-                if request.ctx.session.get('original_user'):
-                    apikey = ''
-                await self._rotate_session(request, user)
-                request.ctx.session['apikey'] = apikey
-                request.ctx.session['access'] = access
-                request.ctx.session['info'] = info
-                request.ctx.session['user'] = user
-                request.ctx.session['visit'] = time.time()
-                return user, apikey, info, access
+                if info is None:
+                    await cur.execute('INSERT INTO sanic_info (user) VALUES (%s) ON DUPLICATE KEY UPDATE user=user', (user,))
+                    info, access = await self._load_user(cur, user)
+        user = info['user']
+        await self._rotate_session(request, user)
+        request.ctx.session['apikey'] = apikey
+        request.ctx.session['access'] = access
+        request.ctx.session['info'] = info
+        request.ctx.session['user'] = user
+        request.ctx.session['visit'] = time.time()
+        request.ctx.session.pop('access_at', None)
+        request.ctx.session.pop('access_manual', None)
+        return user, apikey, info, access
 
 ###############################################################################
 # Standard JSON response envelope used by the endpoints
@@ -453,4 +556,3 @@ def reply(request, success, data, status=200, error=None):
 async def setup_auth(app):
     app.ctx.auth = AuthVerification()
     app.ctx.reply = reply
-    app.ctx.pam = pam.pam()

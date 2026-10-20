@@ -5,7 +5,10 @@ Using Sanic (https://sanic.dev, https://github.com/sanic-org/sanic) as the core,
 # Initial Setup
 
 This software requires various Python libraries to operate, see requirements.txt.
-A simple start.sh script is provided to create a demo Python virtual environment (venv) location and install the python packages via pip.  The first run of start.sh installs the packages; run it again to start the server.
+A simple start.sh script is provided to create a demo Python virtual environment (venv) location and install the python packages via pip.  The first run of start.sh installs the packages; run it again to start the server:
+
+- `./start.sh` starts a development server (debug output and auto reload) that only listens on `127.0.0.1`.  Browse to `http://localhost:8000`.  Debug responses include tracebacks, so do not expose this mode to other machines.
+- `CERT=... KEY=... ./start.sh production` is a production example: no debug or auto reload, TLS on all interfaces (port `PORT`, default 8443), `WORKERS` workers (default 2).
 
 On a fresh Ubuntu machine the scripts in `setup/` install the supporting services:
 
@@ -13,16 +16,29 @@ On a fresh Ubuntu machine the scripts in `setup/` install the supporting service
 - `setup/install-mysql.sh` installs MySQL, creates the database user and database, and loads `setup/auth_tables.sql`.  Run it from inside the `setup/` directory.
 - `setup/auth_tables.sql` creates the authentication tables and is safe to re-run.  `setup/auth_tables_reset.sql` drops them (and all their data).
 - `setup/migrate_apikey_hash.sql` is a one time upgrade for databases created before API keys were stored hashed (see [API keys](#api-keys)).
+- `setup/migrate_user_collation.sql` is a one time upgrade for databases created before user names were case-sensitive and API keys were indexed (see [User names](#user-names)).  Run it after `migrate_apikey_hash.sql` if both are needed.
 
 ## TLS is required
 
-The session cookie is named `__Host-session` and is marked `Secure`, so browsers only store it over HTTPS (browsers treat `http://localhost` as secure, so local development works).  Over plain HTTP to any other host, logons appear to succeed but the session is never kept.  Give Sanic a certificate, for example:
+The session cookie is named `__Host-session` and is marked `Secure`, so browsers only store it over HTTPS (browsers treat `http://localhost` as secure, so local development works).  Over plain HTTP to any other host, logons appear to succeed but the session is never kept; the server logs a warning the first time it sees such a request.  Give Sanic a certificate (as `./start.sh production` does), for example:
 
 ```
 sanic server --host=server.example.com --cert=../ssl/bundle.crt --key=../ssl/bundle.key
 ```
 
 or run it behind a reverse proxy that terminates TLS.  `setup/install-443-redirect.sh` redirects port 443 to Sanic's default port 8000.
+
+## Running behind a reverse proxy
+
+Behind a proxy such as nginx or caddy, every request reaches Sanic from the proxy's address over plain HTTP.  Tell Sanic to trust the proxy's forwarded headers, otherwise all clients share one address for the logon rate limits (so a few failed logons lock everyone out) and HTTPS is not detected (so the HSTS header is never sent).  Set one of these (in the environment or `.env`; Sanic reads them itself):
+
+| Variable | Use when |
+|---|---|
+| `SANIC_PROXIES_COUNT=1` | One proxy in front of Sanic that sets `X-Forwarded-For` and `X-Forwarded-Proto` |
+| `SANIC_REAL_IP_HEADER=x-real-ip` | The proxy sets a single header with the client address |
+| `SANIC_FORWARDED_SECRET=...` | The proxy sends an RFC 7239 `Forwarded` header with a matching `secret=` |
+
+Keep Sanic listening on `127.0.0.1` so clients cannot reach it directly and forge these headers.  The server logs a warning the first time it receives forwarded headers without one of these settings.  See https://sanic.dev/en/guide/advanced/proxy-headers.html for details.
 
 ## Creating the first administrator
 
@@ -35,11 +51,15 @@ INSERT INTO sanic_access (user, access, value) VALUES
   ('alice', 'admin', 'become');        -- may switch to (su) other users
 ```
 
-The user picks up new access at their next logon, or immediately through `GET /auth/refresh`.  After that, further access can be managed with the `/auth/<apikey>/access/...` endpoints.
+Access is re-read from the database on every authenticated request (see `ACCESS_CACHE_SECONDS`), so grants and removals apply immediately, including to sessions that are already logged on.  After that, further access can be managed with the `/auth/<apikey>/access/...` endpoints.
+
+## User names
+
+User names are case-sensitive: `Alice` and `alice` are different users with their own access.  The session always holds the user name exactly as it is stored in `sanic_info`.
 
 # Basic Usage
 
-The program uses environment variables for most configuration items, take a look at env-example, these can be used on the command line, or you can create a .env file that will be read inside of the scripts, this also makes use in docker and docker compose easier.
+The program uses environment variables for most configuration items, take a look at env-example, these can be used on the command line, or you can create a .env file that will be read inside of the scripts.
 
 The API_LOCATIONS setting is one of the most important, and will point to a list of directories that Modular Sanic should search through upon startup.  Specifically, it will search for all .py files that have a Blueprint line (called sub_bp):
 
@@ -51,8 +71,9 @@ If that line is present, specifically the sub_bp portion, Modular Sanic will att
 
 - Relative API_LOCATIONS are resolved against the directory holding `server.py`, not the current directory.
 - Directories and files are loaded in sorted order.  Files whose name starts with `_` (including `__init__.py`) are skipped, which is a convenient place for helper code.
-- A file that mentions `sub_bp` but does not define a `sub_bp` Blueprint is skipped with a notice.  A file that fails to import (or whose blueprint name clashes with another) is reported with its traceback and the remaining files still load.
+- A file that mentions `sub_bp` but does not define a `sub_bp` Blueprint is skipped with a notice.  A file that fails to import, or whose blueprint name is already in use, is reported with its traceback and the remaining files still load.
 - Every blueprint needs a unique name (the first argument to `Blueprint`).
+- A route that is already registered by another file (the same path and method) stops the server from starting, with an error naming the file, because a partly registered blueprint cannot be removed again.
 - Any file in these directories is executed with the server's privileges, so only allow trusted users to write to them.
 
 When Sanic is started with `--reload` and `-R <directory>`, editing a file in a watched directory reloads the server.  Adding a new file does not trigger a reload by itself; it is picked up at the next reload (for example after editing any watched file) or restart.
@@ -98,19 +119,22 @@ async def summary(request):
 
 Things to know:
 
-- `auth.verify(request)` checks the web session only and returns `(ok, username, apikey, access, info)`.
+- `auth.verify(request)` checks the web session and returns `(ok, username, apikey, access, info)`.  With the database available, `access` and `info` are re-read from it, so they are always current.
 - `auth.verifyapi(request, key)` accepts an API key.  The key is read from an `Authorization: Bearer <key>` header when one is sent, otherwise from `key` (for example a URL segment).  A key of `session`, `-` or an empty string checks the web session instead.  Any other key is checked against the database, and the session is neither used nor changed.
 - `access` is a dict that maps an access name to a list of values, for example `{'admin': ['permissions', 'become'], 'reports': ['read']}`.  Rows in `sanic_access` are `(user, access, value)`.
 - `info` is the user's `sanic_info` row (`user`, `fullname`, `department`, and the API key's `apikey_created` / `apikey_expires` times; the key itself is never included).
 - `reply(request, success, data, status=200, error=None)` returns `{"success", "sent", "endpoint", "data"}` (plus `"error"` when given), where `sent` is an ISO-8601 UTC time and `endpoint` is the request path.
 - Use `POST` for anything that changes state.  The session cookie is `SameSite=Strict` by default, so it is never sent on cross-site requests; if you relax `SAMESITE`, state-changing POST endpoints become reachable from other sites.
-- Release a database connection before calling `auth.logon()` (or other `auth` helpers that use the database), so a request never holds two pooled connections at once.
+- Release a database connection before calling `auth.logon()`, `auth.verify()` or other `auth` helpers that use the database, so a request never holds two pooled connections at once.
+- `auth.json_fields(request, 'a', 'b')` returns the named values from a JSON object body as strings, or `None` when any is missing or not a string or number; return `auth.bad_request(request, 'a', 'b')` (a 400) in that case.
+- `auth.setting(request, 'NAME')` returns a page or email setting such as `REDIRECT_LOGON_SUCCESSFUL` with its default.
+- Inline `<script>` blocks in the HTML directory are allowed by the Content-Security-Policy through their hashes, which are computed at startup; restart after editing one.  Pages generated by endpoints that use inline scripts must set their own `Content-Security-Policy` header.
 
 ## API keys
 
-API keys are stored as a SHA-256 hash, so a key is only shown once, in the response to `POST /auth/rekey` (or with the Generate new API key button on `/index.html`).  Generating a new key replaces the old one.  Keys expire `APIKEY_VALID` seconds after they are generated (one year by default, `0` for never).
+API keys are stored as a SHA-256 hash, so a key is only shown once, in the response to `POST /auth/rekey` (or with the Generate new API key button on `/index.html`).  Generating a new key replaces the old one, and requires a logon within the last `AUTH_REKEY_WINDOW` seconds (15 minutes by default), so a stolen session cannot be turned into a long-lived key.  Keys expire `APIKEY_VALID` seconds after they are generated (one year by default, `0` for never).
 
-Send a key as an `Authorization: Bearer <key>` header where possible.  Keys placed in a URL end up in server and proxy logs and browser history.
+Send a key as an `Authorization: Bearer <key>` header with `-` in place of `<apikey>` in the path, for example `curl -H "Authorization: Bearer $KEY" https://server/auth/-/access/list/alice`.  Keys placed in a URL end up in server and proxy logs and browser history.
 
 Databases created before keys were hashed need `setup/migrate_apikey_hash.sql`, run once.  It hashes the existing keys, which keep working with no expiry.
 
@@ -133,7 +157,7 @@ All responses use the JSON envelope described above.  Failed logons return 401, 
 | GET | `/auth/key` | | Current user and access (401 when logged off) |
 | GET | `/auth/info` | | Current user plus site settings used by the logon pages (always 200) |
 | GET | `/auth/refresh` | | Reload the current user's access from the database |
-| POST | `/auth/rekey` | | Generate a new API key, returned only in this response |
+| POST | `/auth/rekey` | | Generate a new API key, returned only in this response (requires a recent logon) |
 | POST | `/auth/su` | JSON: `username` | Switch to another user (requires `admin`/`become`; never to a user with more admin access) |
 | POST | `/auth/return` | | Return to the original user after `/auth/su` |
 | GET | `/auth/<apikey>/access/list/<user>` | | List a user's access (own user, or `admin`/`permissions`) |
@@ -158,21 +182,24 @@ Settings are read from the environment or a `.env` file (see `env-example`).  Fi
 | `FAVICON` | `./html/favicon.ico` | Site icon |
 | `SHOW_SITE_CONTENTS` | `False` | Directory listings for static directories without an index.html |
 | `PAGE_404` | `./errors/404.html` | Page for not found errors (used when the file exists) |
-| `PAGE_500` | `./errors/500.html` | Page for unhandled server errors (used when the file exists) |
+| `PAGE_500` | `./errors/500.html` | Page for unhandled server errors (used when the file exists; one is included) |
 | `DOCUMENTATION` | `False` | Serve the generated API documentation at `/docs` |
 | `HSTS` | not set | When set, the `max-age` in seconds for the Strict-Transport-Security header (HTTPS only) |
 | `HSTS_INCLUDE_SUBDOMAINS` | `True` | Add `includeSubDomains` to the HSTS header |
-| `CONTENT_SECURITY_POLICY` | self-only policy allowing inline scripts/styles | Content-Security-Policy header for every page except `/docs`; empty to disable |
+| `CONTENT_SECURITY_POLICY` | self-only policy; inline scripts allowed by hash, inline styles allowed | Content-Security-Policy header for every page except `/docs`; empty to disable |
 | `REFERRER_POLICY` | `strict-origin-when-cross-origin` | Referrer-Policy header |
 | `DB_HOST`, `DB_PORT` | `127.0.0.1`, `3306` | MySQL/MariaDB server |
 | `DB_USER`, `DB_PASS`, `DB_NAME` | `username`, `password`, `dbname` | MySQL/MariaDB credentials and database |
 | `DB_POOL_MAX` | `10` | Largest number of pooled database connections per worker |
 | `MEMCACHED_HOST`, `MEMCACHED_PORT` | `127.0.0.1`, `11211` | memcached server (sessions and rate limits) |
 | `SAMESITE` | `Strict` | Session cookie SameSite setting (`Strict`, `Lax` or `None`) |
-| `AUTH_VALID` | `604800` | Seconds of inactivity before a session expires |
+| `AUTH_VALID` | `604800` | Seconds of inactivity before a session expires (memcached keeps sessions at most 30 days) |
 | `AUTH_MAX` | `2592000` | Seconds after logon before a session expires, regardless of activity |
 | `AUTH_RATE_LIMIT`, `AUTH_RATE_WINDOW` | `10`, `300` | Logon attempts allowed per client address and per username in each window (seconds) |
 | `APIKEY_VALID` | `31536000` | Seconds before a generated API key expires (`0` for never) |
+| `AUTH_REKEY_WINDOW` | `900` | Generating an API key requires a logon within this many seconds |
+| `ACCESS_CACHE_SECONDS` | `0` | Seconds a session may reuse its access before re-reading it from the database (`0` re-reads every request) |
+| `SANIC_PROXIES_COUNT`, `SANIC_REAL_IP_HEADER`, `SANIC_FORWARDED_SECRET` | not set | Trust a reverse proxy's forwarded headers (see [Running behind a reverse proxy](#running-behind-a-reverse-proxy)) |
 | `PAM_SERVICE` | `login` | PAM service used by `/auth/pam` |
 | `REDIRECT_LOGON_SUCCESSFUL` | `/index.html` | Redirect after a successful logon |
 | `REDIRECT_LOGON_FAILED` | `/logon/logon.html` | Redirect after an unsuccessful logon |
