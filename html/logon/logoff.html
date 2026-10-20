@@ -477,7 +477,7 @@ const AuthUI = (() => {
   form.addEventListener('submit', event => event.preventDefault());
   form.setAttribute('aria-busy', 'true');
 
-  AuthUI.requestJSON('/auth/deauth')
+  AuthUI.requestJSON('/auth/deauth', { method: 'POST' })
     .then(result => {
       const data = result.data || {};
       // These session endpoints can supply a redirect independently of success.

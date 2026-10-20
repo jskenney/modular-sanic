@@ -7,7 +7,7 @@ import time, re
 sub_bp = Blueprint("auth_switch", url_prefix="/auth")
 
 # Return to original user after su
-@sub_bp.route("/return", methods=['GET'])
+@sub_bp.route("/return", methods=['POST'])
 async def system_su_return(request):
     """
     Return to original user after switching.

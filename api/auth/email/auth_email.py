@@ -17,6 +17,9 @@ async def system_request_challenge(request):
     """
     Send an email with a 7 digit challenge.
     """
+    unavailable = request.app.ctx.auth.db_unavailable(request)
+    if unavailable:
+        return unavailable
     data = request.json
     username = data['username']
     redirect = request.app.config.env.str(              'CHALLENGE_PAGE',    default='/logon/challenge.html') +'?user='+username
