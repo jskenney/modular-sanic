@@ -1,7 +1,5 @@
-from sanic import Blueprint, response
-from sanic_ext import openapi
-import asyncio, aiomysql
-import time, re
+from sanic import Blueprint
+import time
 
 sub_bp = Blueprint("auth", url_prefix="/")
 
@@ -15,10 +13,10 @@ async def system_deauth(request):
     await request.app.ctx.auth.logoff(request)
     message = ""
     if not request.ctx.session.get('motd'):
-        message = request.app.config.env.str('AUTH_MESSAGE', default="")
+        message = request.app.ctx.auth.setting(request, 'AUTH_MESSAGE')
         request.ctx.session['motd'] = True
-    page_title = request.app.config.env.str('AUTH_TITLE', default="SanicApp")
-    res = request.app.ctx.reply(request, True, {'apikey': None, 'username': None, 'access': {}, 'info': {}, 'redirect': request.app.config.env.str('REDIRECT_LOGOFF', default="/index.html"), 'logo': request.app.config.env.str('LOGON_LOGO', default="/logon/logo.webp"), 'message': message, 'page_title': page_title})
+    page_title = request.app.ctx.auth.setting(request, 'AUTH_TITLE')
+    res = request.app.ctx.reply(request, True, {'apikey': None, 'username': None, 'access': {}, 'info': {}, 'redirect': request.app.ctx.auth.setting(request, 'REDIRECT_LOGOFF'), 'logo': request.app.ctx.auth.setting(request, 'LOGON_LOGO'), 'message': message, 'page_title': page_title})
     return res
 
 # Show current apikey, assumes we are logged on
@@ -38,17 +36,17 @@ async def system_info(request):
     Show current API key and user data, along with site information.
     """
     ok, username, apikey, access, info = await request.app.ctx.auth.verify(request)
-    redirect = request.app.config.env.str('REDIRECT_LOGON_FAILED', default="/logon/logon.html")
+    redirect = request.app.ctx.auth.setting(request, 'REDIRECT_LOGON_FAILED')
     if ok:
-        redirect = request.app.config.env.str('REDIRECT_LOGON_SUCCESSFUL', default='/index.html')
+        redirect = request.app.ctx.auth.setting(request, 'REDIRECT_LOGON_SUCCESSFUL')
     message = ""
     if not request.ctx.session.get('motd'):
-        message = request.app.config.env.str('AUTH_MESSAGE', default="")
+        message = request.app.ctx.auth.setting(request, 'AUTH_MESSAGE')
         request.ctx.session['motd'] = True
     page_title = ''
-    if request.app.config.env.str('AUTH_TITLE', default="SanicApp"):
-        page_title = request.app.config.env.str('AUTH_TITLE', default="SanicApp")
-    res = request.app.ctx.reply(request, ok, {'apikey': apikey, 'username': username, 'access': access, 'info': info, 'redirect': redirect, 'logo': request.app.config.env.str('LOGON_LOGO', default="/logon/logo.webp"), 'message': message, 'page_title': page_title})
+    if request.app.ctx.auth.setting(request, 'AUTH_TITLE'):
+        page_title = request.app.ctx.auth.setting(request, 'AUTH_TITLE')
+    res = request.app.ctx.reply(request, ok, {'apikey': apikey, 'username': username, 'access': access, 'info': info, 'redirect': redirect, 'logo': request.app.ctx.auth.setting(request, 'LOGON_LOGO'), 'message': message, 'page_title': page_title})
     return res
 
 # Refresh Accesses
@@ -59,17 +57,17 @@ async def system_refresh(request):
     """
     message = ""
     if not request.ctx.session.get('motd'):
-        message = request.app.config.env.str('AUTH_MESSAGE', default="")
+        message = request.app.ctx.auth.setting(request, 'AUTH_MESSAGE')
         request.ctx.session['motd'] = True
-    page_title = request.app.config.env.str('AUTH_TITLE', default="SanicApp")
+    page_title = request.app.ctx.auth.setting(request, 'AUTH_TITLE')
     ok, username, apikey, access, info = await request.app.ctx.auth.verify(request)
     if ok:
         user, apikey, info, access = await request.app.ctx.auth.logon(request, username)
-        redirect = request.app.config.env.str('REDIRECT_LOGON_SUCCESSFUL', default="/index.html")
-        res = request.app.ctx.reply(request, ok, {'apikey': apikey, 'username': username, 'access': access, 'info': info, 'redirect': redirect, 'logo': request.app.config.env.str('LOGON_LOGO', default="/logon/logo.webp"), 'message': message, 'page_title': page_title})
+        redirect = request.app.ctx.auth.setting(request, 'REDIRECT_LOGON_SUCCESSFUL')
+        res = request.app.ctx.reply(request, ok, {'apikey': apikey, 'username': username, 'access': access, 'info': info, 'redirect': redirect, 'logo': request.app.ctx.auth.setting(request, 'LOGON_LOGO'), 'message': message, 'page_title': page_title})
     else:
-        redirect = request.app.config.env.str('REDIRECT_LOGON_FAILED', default="/logon/logon.html")
-        res = request.app.ctx.reply(request, ok, {'apikey': apikey, 'username': username, 'access': access, 'info': info, 'redirect': redirect, 'logo': request.app.config.env.str('LOGON_LOGO', default="/logon/logo.webp"), 'message': message, 'page_title': page_title}, status=401)
+        redirect = request.app.ctx.auth.setting(request, 'REDIRECT_LOGON_FAILED')
+        res = request.app.ctx.reply(request, ok, {'apikey': apikey, 'username': username, 'access': access, 'info': info, 'redirect': redirect, 'logo': request.app.ctx.auth.setting(request, 'LOGON_LOGO'), 'message': message, 'page_title': page_title}, status=401)
     return res
 
 # Show current apikey, assumes we are logged on
@@ -77,13 +75,16 @@ async def system_refresh(request):
 async def system_rekey(request):
     """
     Generate new API Key and provide updated API key and user information.
-    This is the only time the new key is shown.
+    This is the only time the new key is shown.  Requires a logon within the
+    last AUTH_REKEY_WINDOW seconds, so a stolen session cannot mint a key.
     """
     ok, username, apikey, access, info = await request.app.ctx.auth.verify(request)
-    redirect = request.app.config.env.str('REDIRECT_LOGON_FAILED', default="/logon/logon.html")
+    redirect = request.app.ctx.auth.setting(request, 'REDIRECT_LOGON_FAILED')
     # Do not let a switched (su) session rotate the other user's API key
     if ok and request.ctx.session.get('original_user'):
-        return request.app.ctx.reply(request, False, {'apikey': apikey, 'username': username, 'access': access, 'info': info, 'redirect': request.app.config.env.str('REDIRECT_LOGON_SUCCESSFUL', default="/index.html"), 'logo': request.app.config.env.str('LOGON_LOGO', default="/logon/logo.webp")}, status=403, error="The API key cannot be changed while switched to another user.")
+        return request.app.ctx.reply(request, False, {'apikey': apikey, 'username': username, 'access': access, 'info': info, 'redirect': request.app.ctx.auth.setting(request, 'REDIRECT_LOGON_SUCCESSFUL'), 'logo': request.app.ctx.auth.setting(request, 'LOGON_LOGO')}, status=403, error="The API key cannot be changed while switched to another user.")
+    if ok and time.time() - request.ctx.session.get('logon_at', 0) > request.app.config.env.int('AUTH_REKEY_WINDOW', default=900):
+        return request.app.ctx.reply(request, False, {'apikey': apikey, 'username': username, 'access': access, 'info': info, 'redirect': request.app.ctx.auth.setting(request, 'REDIRECT_LOGON_FAILED'), 'logo': request.app.ctx.auth.setting(request, 'LOGON_LOGO')}, status=403, error="Please log on again before generating a new API key.")
     if ok:
         unavailable = request.app.ctx.auth.db_unavailable(request)
         if unavailable:
@@ -91,8 +92,8 @@ async def system_rekey(request):
         newkey = await request.app.ctx.auth.genapikey(request, username)
         user, apikey, info, access = await request.app.ctx.auth.logon(request, username)
         apikey = newkey
-        redirect = request.app.config.env.str('REDIRECT_LOGON_SUCCESSFUL', default="/index.html")
-    res = request.app.ctx.reply(request, ok, {'apikey': apikey, 'username': username, 'access': access, 'info': info, 'redirect': redirect, 'logo': request.app.config.env.str('LOGON_LOGO', default="/logon/logo.webp")}, status=200 if ok else 401)
+        redirect = request.app.ctx.auth.setting(request, 'REDIRECT_LOGON_SUCCESSFUL')
+    res = request.app.ctx.reply(request, ok, {'apikey': apikey, 'username': username, 'access': access, 'info': info, 'redirect': redirect, 'logo': request.app.ctx.auth.setting(request, 'LOGON_LOGO')}, status=200 if ok else 401)
     return res
 
 # Switch Users (assuming admin access)
@@ -163,7 +164,7 @@ async def system_if_logged_on(request):
     """
     ok, username, apikey, access, info = await request.app.ctx.auth.verify(request)
     if ok:
-        redirect = request.app.config.env.str('REDIRECT_LOGON_SUCCESSFUL', default="/index.html")
+        redirect = request.app.ctx.auth.setting(request, 'REDIRECT_LOGON_SUCCESSFUL')
         res = request.app.ctx.reply(request, ok, {'redirect': redirect})
     else:
         res = request.app.ctx.reply(request, ok, {})
@@ -179,6 +180,6 @@ async def system_if_logged_off(request):
     if ok:
         res = request.app.ctx.reply(request, ok, {})
     else:
-        redirect = request.app.config.env.str('REDIRECT_LOGON_FAILED', default="/logon/logon.html")
+        redirect = request.app.ctx.auth.setting(request, 'REDIRECT_LOGON_FAILED')
         res = request.app.ctx.reply(request, ok, {'redirect': redirect})
     return res

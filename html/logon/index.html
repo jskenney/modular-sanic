@@ -230,7 +230,7 @@ code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberat
         <div class="debug-body">
           <section class="debug-section" aria-labelledby="api-key-title">
             <h3 class="debug-title" id="api-key-title">API Key</h3>
-            <p class="debug-description" id="api-key-description">Keys are stored hashed, so a key is only shown once, when it is generated. Generating a new key replaces the old one.</p>
+            <p class="debug-description" id="api-key-description">Keys are stored hashed, so a key is only shown once, when it is generated. Generating a new key replaces the old one, and needs a recent logon (log on again if it is refused).</p>
             <code class="code-panel" id="akey" aria-labelledby="api-key-title" aria-describedby="api-key-description">Pending server response…</code>
             <p><button class="button button-primary" id="rekey-button" type="button">Generate new API key</button></p>
             <p class="notice">Note: API keys are unavailable if MySQL database is not used.</p>
@@ -247,19 +247,19 @@ code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberat
       <section class="card" aria-labelledby="access-title">
         <div class="card-heading">
           <h2 class="card-title" id="access-title">Access Endpoints</h2>
-          <p class="card-description">Endpoints below require an API key, sent as an <code>Authorization: Bearer</code> header or in place of &lt;apikey&gt;. Use <code>session</code> or <code>-</code> as &lt;apikey&gt; to use your web session instead. Add and remove must be sent as POST.</p>
+          <p class="card-description">Endpoints below require an API key. Send it as an <code>Authorization: Bearer</code> header and use <code>-</code> in the path, as shown, so the key stays out of URLs and logs (a key in place of <code>-</code> also works). With no header, <code>-</code> or <code>session</code> uses your web session. Add and remove must be sent as POST.</p>
         </div>
         <dl class="endpoint-list access-list">
           <div class="endpoint-row">
-            <dt><code class="endpoint-path" data-api-template="/auth/&lt;apikey&gt;/access/list/&lt;user&gt;">/auth/&lt;apikey&gt;/access/list/&lt;user&gt;</code></dt>
+            <dt><code class="endpoint-path" data-api-template="GET /auth/-/access/list/&lt;user&gt;  (Authorization: Bearer &lt;apikey&gt;)">GET /auth/-/access/list/&lt;user&gt;  (Authorization: Bearer &lt;apikey&gt;)</code></dt>
             <dd>Lists Accesses <span class="endpoint-note">(requires admin for other users)</span></dd>
           </div>
           <div class="endpoint-row">
-            <dt><code class="endpoint-path" data-api-template="/auth/&lt;apikey&gt;/access/add/&lt;user&gt;/&lt;access&gt;/&lt;value&gt;">/auth/&lt;apikey&gt;/access/add/&lt;user&gt;/&lt;access&gt;/&lt;value&gt;</code></dt>
+            <dt><code class="endpoint-path" data-api-template="POST /auth/-/access/add/&lt;user&gt;/&lt;access&gt;/&lt;value&gt;  (Authorization: Bearer &lt;apikey&gt;)">POST /auth/-/access/add/&lt;user&gt;/&lt;access&gt;/&lt;value&gt;  (Authorization: Bearer &lt;apikey&gt;)</code></dt>
             <dd>Add/Modify Access <span class="endpoint-note">(requires admin)</span></dd>
           </div>
           <div class="endpoint-row">
-            <dt><code class="endpoint-path" data-api-template="/auth/&lt;apikey&gt;/access/remove/&lt;user&gt;/&lt;access&gt;/&lt;value&gt;">/auth/&lt;apikey&gt;/access/remove/&lt;user&gt;/&lt;access&gt;/&lt;value&gt;</code></dt>
+            <dt><code class="endpoint-path" data-api-template="POST /auth/-/access/remove/&lt;user&gt;/&lt;access&gt;/&lt;value&gt;  (Authorization: Bearer &lt;apikey&gt;)">POST /auth/-/access/remove/&lt;user&gt;/&lt;access&gt;/&lt;value&gt;  (Authorization: Bearer &lt;apikey&gt;)</code></dt>
             <dd>Remove Access <span class="endpoint-note">(requires admin)</span></dd>
           </div>
         </dl>
