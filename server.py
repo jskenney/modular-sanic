@@ -37,26 +37,11 @@ app.config.env = env
 # Stored sessions expire after AUTH_VALID seconds of inactivity, and the
 # __Host- cookie prefix stops other subdomains from planting a session cookie.
 # SameSite=Strict (the default) keeps the cookie off all cross-site requests.
-# Memcached cannot hold entries longer than 30 days, so the stored session is
-# capped there; verify() still enforces AUTH_VALID itself.
-session_expiry = min(app.config.env.int('AUTH_VALID', default=604800), 2592000)
+# sanic-session only saves sessions that changed, keeps memcached entries at
+# most 30 days (the cookie keeps the full AUTH_VALID), and answers 503 when
+# the session store cannot be written; verify() enforces AUTH_VALID itself.
+session_expiry = app.config.env.int('AUTH_VALID', default=604800)
 session_samesite = app.config.env.str('SAMESITE', default='Strict')
-
-# Only write the session back (and re-send the cookie) when it changed, so
-# static files and unchanged requests do not rewrite memcached every time.
-class SaveWhenModified:
-    async def save(self, request, response):
-        session = getattr(request.ctx, self.session_name, None)
-        if session is not None and not session.modified:
-            return
-        await super().save(request, response)
-
-class MemcacheSessions(SaveWhenModified, MemcacheSessionInterface):
-    pass
-
-class InMemorySessions(SaveWhenModified, InMemorySessionInterface):
-    pass
-
 try:
     test_client = pymemcache.client.base.Client((app.config.env.str('MEMCACHED_HOST', default='127.0.0.1'),
                                                  app.config.env.str('MEMCACHED_PORT', default='11211')))
@@ -64,13 +49,13 @@ try:
     test_client.close()
     client = aiomcache.Client(app.config.env.str('MEMCACHED_HOST', default='127.0.0.1'),
                               app.config.env.str('MEMCACHED_PORT', default='11211'))
-    Session(app, interface=MemcacheSessions(client, samesite=session_samesite, secure=True,
-                                            cookie_name="__Host-session", expiry=session_expiry))
+    Session(app, interface=MemcacheSessionInterface(client, samesite=session_samesite, secure=True,
+                                                     cookie_name="__Host-session", expiry=session_expiry))
     print("Notice: Using Memcached Session Handling")
     app.config.MEMCACHEAVAIL = True
 except Exception as e:
-    Session(app, interface=InMemorySessions(samesite=session_samesite, secure=True,
-                                            cookie_name="__Host-session", expiry=session_expiry))
+    Session(app, interface=InMemorySessionInterface(samesite=session_samesite, secure=True,
+                                                    cookie_name="__Host-session", expiry=session_expiry))
     print(f"Notice: Memcached connection failed: {type(e).__name__} | Message: {e}")
     print("Notice: Using InMemory Session Handling")
     app.config.MEMCACHEAVAIL = False
@@ -383,10 +368,7 @@ class AuthVerification:
             return
         if not session.get('user'):
             session['logon_at'] = time.time()
-        interface = request.app.ctx.extensions['session'].interface
-        await interface._delete_key(interface.prefix + session.sid)
-        session.sid = uuid.uuid4().hex
-        session.modified = True
+        await request.app.ctx.extensions['session'].interface.regenerate(request)
     # Count one attempt against a fixed window, returns True once over the limit.
     # Memcached shares the counts between workers, otherwise they are per worker.
     async def _count_attempt(self, request, key, limit, window):

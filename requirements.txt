@@ -1,5 +1,3 @@
-setuptools
-wheel
 sanic
 sanic-ext
 aiomysql
@@ -13,6 +11,6 @@ orjson
 ujson
 pydantic
 environs
-sanic_session@git+https://github.com/jskenney/sanic-session
+sanic_session @ git+https://github.com/jskenney/sanic-session@v0.9.0
 
 
