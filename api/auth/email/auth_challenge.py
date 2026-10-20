@@ -1,7 +1,7 @@
 from sanic import Blueprint, response
 from sanic_ext import openapi
 import asyncio, aiomysql
-import time, re
+import time, re, secrets
 
 sub_bp = Blueprint("auth_challenge_option", url_prefix="/auth")
 
@@ -10,26 +10,34 @@ async def system_challenge(request):
     """
     Verify a authentication challenge request.
     """
-    endpoint = '/auth/challenge/'
+    unavailable = request.app.ctx.auth.db_unavailable(request)
+    if unavailable:
+        return unavailable
     data = request.json
     user = data['username']
-    token = data['challenge']
+    token = str(data['challenge'])
+    failed = {'username': None, 'apikey': '', 'access': {}, 'info': {}, 'redirect': request.app.config.env.str('REDIRECT_LOGON_FAILED', default='/logon/logon.html')}
+    if await request.app.ctx.auth.throttled(request, 'logon', user):
+        return request.app.ctx.reply(request, False, failed, status=429, error="Too many attempts, please wait and try again.")
     await request.app.ctx.auth.logoff(request)
     async with request.app.ctx.pool.acquire() as conn:
         async with conn.cursor(aiomysql.DictCursor) as cur:
-            query = 'SELECT * FROM sanic_challenge WHERE user=%s AND expect=%s AND attempts < 10 AND sent > NOW() - INTERVAL 10 MINUTE'
-            values = (user, token,)
+            # Count the attempt before checking it, in one statement, so concurrent
+            # guesses cannot get past the attempt limit.
+            query = 'UPDATE sanic_challenge SET attempts = attempts + 1 WHERE user=%s AND attempts < 10 AND sent > NOW() - INTERVAL 10 MINUTE'
+            values = (user, )
             await cur.execute(query, values)
-            info = await cur.fetchall()
-            if len(info) == 0:
-                query = 'UPDATE sanic_challenge SET attempts = attempts + 1 WHERE user=%s'
-                values = (user, )
-                await cur.execute(query, values)
-                res = response.json({'success': False, 'sent': time.asctime(time.localtime(time.time())), 'endpoint':endpoint, 'data':{'username': None, 'apikey': '', 'access': {}, 'info': {}, 'redirect': request.app.config.env.str('REDIRECT_LOGON_FAILED', default='/logon/logon.html')}})
-                return res
+            if cur.rowcount != 1:
+                return request.app.ctx.reply(request, False, failed, status=401)
+            query = 'SELECT expect FROM sanic_challenge WHERE user=%s'
+            await cur.execute(query, values)
+            info = await cur.fetchone()
+            if not info or not secrets.compare_digest(str(info['expect']).encode(), token.encode()):
+                return request.app.ctx.reply(request, False, failed, status=401)
             query = 'DELETE FROM sanic_challenge WHERE user=%s'
             values = (user,)
             await cur.execute(query, values)
-            user, apikey, info, access = await request.app.ctx.auth.logon(request, user)
-            res = response.json({'success': True, 'sent': time.asctime(time.localtime(time.time())), 'endpoint': endpoint, 'data':{'username': user, 'apikey': apikey, 'access': access, 'info': info, 'redirect': request.app.config.env.str('REDIRECT_LOGON_SUCCESSFUL', default='/index.html')}})
-            return res
+    # Log on after the connection is returned, logon() uses its own connection
+    user, apikey, info, access = await request.app.ctx.auth.logon(request, user)
+    res = request.app.ctx.reply(request, True, {'username': user, 'apikey': apikey, 'access': access, 'info': info, 'redirect': request.app.config.env.str('REDIRECT_LOGON_SUCCESSFUL', default='/index.html')})
+    return res

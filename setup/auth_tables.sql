@@ -1,18 +1,18 @@
 ###############################################################################
 ## Default MySQL tables for autentication purposes within the framework
+## Safe to re-run, existing tables and data are kept (see auth_tables_reset.sql)
 
-DROP TABLE IF EXISTS sanic_challenge;
-DROP TABLE IF EXISTS sanic_access;
-DROP TABLE IF EXISTS sanic_info;
-CREATE TABLE `sanic_info` (
+CREATE TABLE IF NOT EXISTS `sanic_info` (
   `user` VARCHAR(64) NOT NULL,
   `fullname` VARCHAR(250) NULL,
   `department` VARCHAR(250) NULL,
   `apikey` VARCHAR(99) NULL,
+  `apikey_created` DATETIME NULL,
+  `apikey_expires` DATETIME NULL,
   CONSTRAINT PK_sanic_info PRIMARY KEY (user)
 );
 
-CREATE TABLE `sanic_access` (
+CREATE TABLE IF NOT EXISTS `sanic_access` (
   `user` VARCHAR(64) NOT NULL,
   `access` VARCHAR(250) NOT NULL,
   `value` VARCHAR(250) NOT NULL,
@@ -22,7 +22,7 @@ CREATE TABLE `sanic_access` (
    ON DELETE CASCADE ON UPDATE CASCADE
 );
 
-CREATE TABLE `sanic_challenge` (
+CREATE TABLE IF NOT EXISTS `sanic_challenge` (
   `user` VARCHAR(64) NOT NULL,
   `expect` VARCHAR(250) NOT NULL,
   `attempts` INT DEFAULT 0,

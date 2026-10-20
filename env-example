@@ -2,6 +2,11 @@
 APP_NAME=SanicApp
 API_LOCATIONS=api/auth/general,api/auth/switchuser,api/auth/pam,api/auth/apikey,api/auth/email
 #HSTS=86400
+# Add includeSubDomains to the HSTS header
+#HSTS_INCLUDE_SUBDOMAINS=True
+# Content-Security-Policy for every page except /docs (empty to disable)
+#CONTENT_SECURITY_POLICY=default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'
+#REFERRER_POLICY=strict-origin-when-cross-origin
 #DOCUMENTATION=False
 SHOW_SITE_CONTENTS=True
 
@@ -11,6 +16,8 @@ DB_USER=username
 DB_PASS=password
 DB_NAME=dbname
 DB_PORT=3306
+# Largest number of pooled database connections per worker
+DB_POOL_MAX=10
 
 # Memcached Connection Settings
 MEMCACHED_HOST=127.0.0.1
@@ -18,22 +25,49 @@ MEMCACHED_PORT=11211
 
 # The following values are located relative to server.py's filesystem location
 # Note the intial page will be 'HTML'/index.html to follow convention
-HTML=./html/                                  # Location of html directory
-FAVICON=./html/favicon.ico                    # Site icon
-PAGE_404=./html/404.html                      # Location of 404 Error (doc not found)
+# Location of html directory
+HTML=./html/
+# Site icon
+FAVICON=./html/favicon.ico
+# Location of 404 Error (doc not found)
+PAGE_404=./errors/404.html
+# Location of the page shown for unhandled server errors (500)
+PAGE_500=./errors/500.html
 
 # The following values are located depending on system configurations and are
 # NOT relative to the location of server.py.
-REDIRECT_LOGON_SUCCESSFUL=/index.html         # Redirect after successful logon
-REDIRECT_LOGON_FAILED=/logon/logon.html       # Redirect after unsuccessful logon
-REDIRECT_LOGOFF=/index.html                   # Redirect after logoff
-CHALLENGE_PAGE=/logon/challenge.html          # Page for authentication challenges
-LOGON_LOGO=/logon/logo.webp                   # Large image for logon pages
+# Redirect after successful logon
+REDIRECT_LOGON_SUCCESSFUL=/index.html
+# Redirect after unsuccessful logon
+REDIRECT_LOGON_FAILED=/logon/logon.html
+# Redirect after logoff
+REDIRECT_LOGOFF=/index.html
+# Page for authentication challenges
+CHALLENGE_PAGE=/logon/challenge.html
+# Large image for logon pages
+LOGON_LOGO=/logon/logo.webp
 
 # Authentication Settings
-AUTH_VALID=604800                             # A Session is valid for 7 days        *
-AUTH_MESSAGE=""                               # Sign on Banner / Consent Banner
-AUTH_TITLE='SanicApp V1'                      # Email Challenge - Title
-AUTH_EMAILER='noreply@example.com'            # Email Challenge - Return Address
-AUTH_DOMAIN='@example.com                     # Email Challenge - Email Domain
-AUTH_EMAIL_SERVER=localhost                   # Email Challenge - Local SMTP Server
+# A Session expires after 7 days without activity
+AUTH_VALID=604800
+# A Session expires 30 days after logon, regardless of activity
+AUTH_MAX=2592000
+# At most 10 logon attempts per client address and per username every 300 seconds
+AUTH_RATE_LIMIT=10
+AUTH_RATE_WINDOW=300
+# Session cookie SameSite setting (Strict, Lax or None)
+SAMESITE=Strict
+# API keys expire this many seconds after they are generated (0 for never)
+APIKEY_VALID=31536000
+# PAM service used for /auth/pam (e.g. a service restricted to an allowed group)
+PAM_SERVICE=login
+# Sign on Banner / Consent Banner
+AUTH_MESSAGE=""
+# Email Challenge - Title
+AUTH_TITLE='SanicApp V1'
+# Email Challenge - Return Address
+AUTH_EMAILER='noreply@example.com'
+# Email Challenge - Email Domain
+AUTH_DOMAIN='@example.com'
+# Email Challenge - Local SMTP Server
+AUTH_EMAIL_SERVER=localhost
