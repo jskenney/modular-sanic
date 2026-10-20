@@ -440,7 +440,10 @@ const AuthUI = (() => {
   async function requestJSON(url, options) {
     // Keep native same-origin cookies and the caller's original request encoding.
     const response = await fetch(url, options);
-    if (!response.ok) throw new Error(`HTTP error! Status: ${response.status}`);
+    // Rejected requests (400/401/403/404/413/429) still return the JSON envelope.
+    if (!response.ok && ![400, 401, 403, 404, 413, 429].includes(response.status)) {
+      throw new Error(`HTTP error! Status: ${response.status}`);
+    }
     return response.json();
   }
 

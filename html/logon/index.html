@@ -323,7 +323,8 @@ code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberat
     try {
       // Preserve the original same-origin GET request and browser session.
       const response = await fetch('/auth/key');
-      if (!response.ok) {
+      // 401 means not logged on; the JSON envelope is still returned.
+      if (!response.ok && response.status !== 401) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
       const result = await response.json();
