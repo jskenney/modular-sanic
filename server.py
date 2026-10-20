@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from urllib.parse import urlsplit
 from sanic_session import Session, MemcacheSessionInterface, InMemorySessionInterface
 import aiomysql, aiomcache, pymemcache
-import os, importlib.util, time, uuid, sys, environs, hashlib, re, base64
+import os, importlib.util, time, uuid, sys, environs, hashlib, re, base64, collections
 import pymysql
 from dotenv import dotenv_values
 
@@ -33,32 +33,49 @@ app.config.env = env
 
 ###############################################################################
 # Enable Session Support (Default to Memcached interface),
-# use in-memory model if Memcached is unavailable.
+# use in-memory model if Memcached is unavailable (or stop, with
+# MEMCACHED_REQUIRED=True, so several workers never run with separate
+# in-memory sessions).
 # Stored sessions expire after AUTH_VALID seconds of inactivity, and the
 # __Host- cookie prefix stops other subdomains from planting a session cookie.
 # SameSite=Strict (the default) keeps the cookie off all cross-site requests.
-# sanic-session only saves sessions that changed, keeps memcached entries at
-# most 30 days (the cookie keeps the full AUTH_VALID), and answers 503 when
-# the session store cannot be written; verify() enforces AUTH_VALID itself.
+# sanic-session saves sessions that changed (also inside nested values) and
+# rewrites unchanged ones now and then so active sessions do not expire; it
+# keeps memcached entries at most 30 days (the cookie keeps the full
+# AUTH_VALID).  Static files get no session, so they never touch memcached.
+# A session that cannot be saved gives a JSON error (503) instead of the
+# response; verify() enforces AUTH_VALID itself.
+# One memcached client is shared by the sessions, the rate limits and the
+# access versions (app.ctx.mc), and closed when the server stops.
 session_expiry = app.config.env.int('AUTH_VALID', default=604800)
 session_samesite = app.config.env.str('SAMESITE', default='Strict')
+memcached_host = app.config.env.str('MEMCACHED_HOST', default='127.0.0.1')
+memcached_port = app.config.env.int('MEMCACHED_PORT', default=11211)
+def static_request(request):
+    return request.route is not None and request.route.name in (f'{app.name}.static', f'{app.name}.favicon')
+def session_store_error(request, exception):
+    return reply(request, False, {}, status=exception.status, error=exception.message)
+session_options = dict(samesite=session_samesite, secure=True, cookie_name="__Host-session", expiry=session_expiry)
 try:
-    test_client = pymemcache.client.base.Client((app.config.env.str('MEMCACHED_HOST', default='127.0.0.1'),
-                                                 app.config.env.str('MEMCACHED_PORT', default='11211')))
-    test = test_client.get('user')
+    test_client = pymemcache.client.base.Client((memcached_host, memcached_port), connect_timeout=2, timeout=2)
+    test_client.get('user')
     test_client.close()
-    client = aiomcache.Client(app.config.env.str('MEMCACHED_HOST', default='127.0.0.1'),
-                              app.config.env.str('MEMCACHED_PORT', default='11211'))
-    Session(app, interface=MemcacheSessionInterface(client, samesite=session_samesite, secure=True,
-                                                     cookie_name="__Host-session", expiry=session_expiry))
+    memcache_client = aiomcache.Client(memcached_host, memcached_port)
+    session_interface = MemcacheSessionInterface(memcache_client, **session_options)
     print("Notice: Using Memcached Session Handling")
     app.config.MEMCACHEAVAIL = True
 except Exception as e:
-    Session(app, interface=InMemorySessionInterface(samesite=session_samesite, secure=True,
-                                                    cookie_name="__Host-session", expiry=session_expiry))
-    print(f"Notice: Memcached connection failed: {type(e).__name__} | Message: {e}")
+    if app.config.env.bool('MEMCACHED_REQUIRED', default=False):
+        raise RuntimeError(f"Memcached at {memcached_host}:{memcached_port} is unavailable "
+                           f"(MEMCACHED_REQUIRED is set): {type(e).__name__}: {e}") from e
+    memcache_client = None
+    session_interface = InMemorySessionInterface(**session_options)
+    logger.warning(f"Memcached at {memcached_host}:{memcached_port} is unavailable ({type(e).__name__}: {e}), "
+                   "using in-memory sessions: they are lost on restart and not shared between workers, "
+                   "and rate limits are per worker.  Set MEMCACHED_REQUIRED=True to stop instead.")
     print("Notice: Using InMemory Session Handling")
     app.config.MEMCACHEAVAIL = False
+Session(app, interface=session_interface, ignore=static_request, on_store_error=session_store_error)
 
 ###############################################################################
 # Determine where the root of the website exists and where
@@ -66,7 +83,8 @@ except Exception as e:
 app.static("/",
            app.config.env.str('HTML', default='./html/'),
            index="index.html",
-           directory_view=app.config.env.bool('SHOW_SITE_CONTENTS', default=False))
+           directory_view=app.config.env.bool('SHOW_SITE_CONTENTS', default=False),
+           name='static')
 app.static("/favicon.ico",
            app.config.env.str('FAVICON', default='./html/favicon.ico'),
            name='favicon')
@@ -97,6 +115,23 @@ if os.path.exists(page_500):
         return html(page_500_html, status=500)
 
 ###############################################################################
+# Database errors while running (MySQL stopped or unreachable) and a rate
+# limiter that cannot count (memcached failing) answer with the JSON
+# envelope and a 503, before any password or key is checked.
+class RateLimitUnavailable(Exception):
+    pass
+
+@app.exception(pymysql.err.OperationalError, pymysql.err.InterfaceError)
+async def handle_database_errors(request, exception):
+    logger.error(f"Database error on {request.path}: {type(exception).__name__}: {exception}")
+    return reply(request, False, {}, status=503, error="The database is unavailable.")
+
+@app.exception(RateLimitUnavailable)
+async def handle_rate_limit_unavailable(request, exception):
+    logger.error(f"Rate limit check failed on {request.path}, refusing the request: {exception}")
+    return reply(request, False, {}, status=503, error="The service is unavailable, please try again later.")
+
+###############################################################################
 # Block documentation generation
 if not app.config.env.bool('DOCUMENTATION', default=False):
     app.config.OAS=False
@@ -107,7 +142,7 @@ if not app.config.env.bool('DOCUMENTATION', default=False):
 if app.config.env.str('HSTS', default=''):
     print("Notice: Set HSTS to", app.config.env.str('HSTS', default='86400'))
     hsts_value = "max-age="+app.config.env.str('HSTS', default='86400')
-    if app.config.env.bool('HSTS_INCLUDE_SUBDOMAINS', default=True):
+    if app.config.env.bool('HSTS_INCLUDE_SUBDOMAINS', default=False):
         hsts_value += "; includeSubDomains"
     @app.middleware("response")
     async def add_hsts_headers(request, response):
@@ -228,13 +263,11 @@ for source in (app.config.env.list('API_LOCATIONS', default=['./api', './externa
             print("Notice: Loaded blueprint from", filename)
 
 ###############################################################################
-# Configure and connect to memcached.
+# The shared memcached client (also used by the sessions), closed at shutdown.
 @app.listener('before_server_start')
 async def setup_memcache(app):
     if app.config.MEMCACHEAVAIL:
-        app.ctx.mc = aiomcache.Client(app.config.env.str('MEMCACHED_HOST', default='127.0.0.1'),
-                                      app.config.env.str('MEMCACHED_PORT', default='11211'))
-        print("Notice: Memcached connection pool created.")
+        app.ctx.mc = memcache_client
 
 @app.listener('after_server_stop')
 async def close_memcache(app):
@@ -278,7 +311,7 @@ async def close_db(app):
 # sanic_info, sanic_access, and sanic_challenge tables.
 class AuthVerification:
     # Session keys that hold the logged on identity
-    AUTH_KEYS = ('user', 'visit', 'logon_at', 'access', 'info', 'apikey', 'original_user', 'access_at', 'access_manual')
+    AUTH_KEYS = ('user', 'visit', 'logon_at', 'access', 'info', 'apikey', 'original_user', 'access_at', 'access_manual', 'access_version')
     # API key values that mean "use the web session instead of a key"
     SESSION_KEYS = ('session', '-', '')
     # Defaults for the page and email settings used by the endpoints
@@ -295,11 +328,24 @@ class AuthVerification:
         'AUTH_EMAIL_SERVER': 'localhost',
         'PAM_SERVICE': 'login',
     }
+    # Most attempt counters kept in memory (when memcached is not used)
+    MAX_ATTEMPT_KEYS = 100000
     def __init__(self):
-        self.attempts = {}
+        self.attempts = collections.OrderedDict()
+        self.attempts_pruned = time.time()
     # A page or email setting, from the environment or its default
     def setting(self, request, name):
         return request.app.config.env.str(name, default=self.SETTINGS[name])
+    # The AUTH_MESSAGE banner, once per browser session: a small cookie
+    # remembers that it was shown (set by remember_banner below), so showing
+    # it never creates a stored session.
+    BANNER_COOKIE = '__Host-banner'
+    def banner(self, request):
+        message = self.setting(request, 'AUTH_MESSAGE')
+        if not message or request.cookies.get(self.BANNER_COOKIE) or request.ctx.session.get('motd'):
+            return ''
+        request.ctx.banner_shown = True
+        return message
     # Required values from a JSON object body, as strings (numbers are accepted
     # and converted); returns None when the body or any value is missing or invalid
     @staticmethod
@@ -325,17 +371,62 @@ class AuthVerification:
     @staticmethod
     def _public_info(row):
         return {k: (v.isoformat() if isinstance(v, datetime) else v) for k, v in row.items() if k != 'apikey'}
-    # Load a user's sanic_info row (public form) and access dict with an open cursor
+    # Load a user's sanic_info row (public form) and access dict with an open
+    # cursor, in one query
     async def _load_user(self, cur, user):
-        await cur.execute('SELECT * FROM sanic_info WHERE user = %s', (user,))
+        await cur.execute('SELECT i.*, a.access AS sanic_access_name, a.value AS sanic_access_value '
+                          'FROM sanic_info i LEFT JOIN sanic_access a ON a.user = i.user '
+                          'WHERE i.user = %s ORDER BY a.access, a.value', (user,))
         rows = await cur.fetchall()
         if len(rows) == 0:
             return None, {}
-        await cur.execute('SELECT access, value FROM sanic_access WHERE user = %s ORDER BY access, value', (user,))
         access = {}
-        for row in await cur.fetchall():
-            access.setdefault(row['access'], []).append(row['value'])
-        return self._public_info(rows[0]), access
+        for row in rows:
+            if row['sanic_access_name'] is not None:
+                access.setdefault(row['sanic_access_name'], []).append(row['sanic_access_value'])
+        info = {k: v for k, v in rows[0].items() if k not in ('sanic_access_name', 'sanic_access_value')}
+        return self._public_info(info), access
+    # memcached incr that returns None for a missing key (aiomcache raises
+    # ClientException("...: bytearray(b'NOT_FOUND')") instead of returning None)
+    @staticmethod
+    async def _incr(request, key):
+        try:
+            return await request.app.ctx.mc.incr(key)
+        except aiomcache.exceptions.ClientException as e:
+            if "b'NOT_FOUND'" in str(e):
+                return None
+            raise
+    # Access versions: a per-user number in memcached, changed whenever the app
+    # changes the user's access or key, so verify() only re-reads the database
+    # when it changed (or after ACCESS_CACHE_SECONDS, for changes made directly
+    # in the database).  A missing version gets a new random one, so it never
+    # matches a stale session.  None means unavailable (re-read every time).
+    @staticmethod
+    def _version_key(user):
+        return ('accessver:' + hashlib.sha256(str(user).encode()).hexdigest()).encode()
+    async def _access_version(self, request, user):
+        if not request.app.config.MEMCACHEAVAIL:
+            return None
+        key = self._version_key(user)
+        try:
+            version = await request.app.ctx.mc.get(key)
+            if version is None:
+                await request.app.ctx.mc.add(key, str(time.time_ns()).encode(), exptime=2592000)
+                version = await request.app.ctx.mc.get(key)
+            return version.decode() if version is not None else None
+        except Exception as e:
+            logger.warning(f"Access version check failed: {type(e).__name__} | Message: {e}")
+            return None
+    async def _bump_access_version(self, request, user):
+        if not request.app.config.MEMCACHEAVAIL:
+            return
+        key = self._version_key(user)
+        try:
+            if await self._incr(request, key) is None:
+                await request.app.ctx.mc.add(key, str(time.time_ns()).encode(), exptime=2592000)
+        except Exception as e:
+            # Sessions then keep the old access until ACCESS_CACHE_SECONDS pass
+            logger.error(f"Access version update for {user} failed: {type(e).__name__} | Message: {e}")
     # Returns a 503 response when the database is unavailable, otherwise None
     def db_unavailable(self, request):
         if request.app.config.MYSQLAVAIL:
@@ -371,23 +462,35 @@ class AuthVerification:
         await request.app.ctx.extensions['session'].interface.regenerate(request)
     # Count one attempt against a fixed window, returns True once over the limit.
     # Memcached shares the counts between workers, otherwise they are per worker.
+    # When memcached fails, RateLimitUnavailable refuses the request (503), so
+    # credentials are never checked without a limit.
     async def _count_attempt(self, request, key, limit, window):
         key = 'ratelimit:' + hashlib.sha256(key.encode()).hexdigest()
         if request.app.config.MEMCACHEAVAIL:
             try:
-                await request.app.ctx.mc.add(key.encode(), b'0', exptime=window)
-                count = await request.app.ctx.mc.incr(key.encode())
-                return count is not None and count > limit
+                # The counter can vanish between add and incr (expiry, eviction,
+                # flush_all), so try once more before refusing
+                for _ in range(2):
+                    await request.app.ctx.mc.add(key.encode(), b'0', exptime=window)
+                    count = await self._incr(request, key.encode())
+                    if count is not None:
+                        return count > limit
             except Exception as e:
-                logger.warning(f"Rate limit check failed: {type(e).__name__} | Message: {e}")
-                return False
+                raise RateLimitUnavailable(f"{type(e).__name__}: {e}") from e
+            raise RateLimitUnavailable("the attempt counter could not be created")
         now = time.time()
-        if len(self.attempts) > 10000:
-            self.attempts = {k: v for k, v in self.attempts.items() if now - v[0] <= window}
+        # Drop expired counters at most once per window, and the oldest ones
+        # beyond MAX_ATTEMPT_KEYS, so a flood of names cannot slow every attempt
+        if now - self.attempts_pruned >= window:
+            self.attempts = collections.OrderedDict((k, v) for k, v in self.attempts.items() if now - v[0] <= window)
+            self.attempts_pruned = now
         start, count = self.attempts.get(key, (now, 0))
         if now - start > window:
             start, count = now, 0
+            self.attempts.pop(key, None)
         self.attempts[key] = (start, count + 1)
+        while len(self.attempts) > self.MAX_ATTEMPT_KEYS:
+            self.attempts.popitem(last=False)
         return count + 1 > limit
     # Rate limit authentication attempts by client address and (optionally) username
     async def throttled(self, request, bucket, username=None):
@@ -400,23 +503,31 @@ class AuthVerification:
             logger.warning(f"Rate limit exceeded: bucket={bucket} ip={request.remote_addr or request.ip} user={username}")
         return over
     # Verify User's Status by checking the session.  With MySQL available the
-    # user's access and info are re-read from the database (at most every
-    # ACCESS_CACHE_SECONDS), so granted or revoked access applies right away;
-    # access set by logon(..., forceNoMySQL=True) is left as it was given.
+    # user's access and info are re-read from the database when the user's
+    # access version (memcached) changed, so access granted or revoked through
+    # the app applies right away, and otherwise at most every
+    # ACCESS_CACHE_SECONDS (default 300 with memcached, for changes made
+    # directly in the database; 0 without memcached: every request).
+    # Access set by logon(..., forceNoMySQL=True) is left as it was given.
     async def verify(self, request):
         session = request.ctx.session
         if self._session_expired(request):
             self._clear_auth(request)
             return False, None, None, {}, {}
         now = time.time()
-        if request.app.config.MYSQLAVAIL and not session.get('access_manual') and now - session.get('access_at', 0) >= request.app.config.env.int('ACCESS_CACHE_SECONDS', default=0):
-            async with request.app.ctx.pool.acquire() as conn:
-                async with conn.cursor(aiomysql.DictCursor) as cur:
-                    info, access = await self._load_user(cur, session['user'])
-            self._set(session, 'access', access)
-            self._set(session, 'info', info or {})
-            if request.app.config.env.int('ACCESS_CACHE_SECONDS', default=0) > 0:
-                session['access_at'] = now
+        if request.app.config.MYSQLAVAIL and not session.get('access_manual'):
+            version = await self._access_version(request, session['user'])
+            max_age = request.app.config.env.int('ACCESS_CACHE_SECONDS', default=0 if version is None else 300)
+            if version is None or version != session.get('access_version') or now - session.get('access_at', 0) >= max_age:
+                async with request.app.ctx.pool.acquire() as conn:
+                    async with conn.cursor(aiomysql.DictCursor) as cur:
+                        info, access = await self._load_user(cur, session['user'])
+                self._set(session, 'access', access)
+                self._set(session, 'info', info or {})
+                if version is not None:
+                    self._set(session, 'access_version', version)
+                if max_age > 0:
+                    session['access_at'] = now
         # The idle timer only needs minute resolution, which keeps session writes down
         if now - session.get('visit') >= 60:
             session['visit'] = now
@@ -463,7 +574,8 @@ class AuthVerification:
                 hashed = self.hashkey(apikey)
                 values = (user, hashed, valid, valid, hashed, valid, valid, )
                 await cur.execute(query, values)
-                return apikey
+        await self._bump_access_version(request, user)
+        return apikey
     # Update Access Information, requires MySQL.  Returns True when added,
     # False for an unknown user or an access that is already present.
     async def access_add(self, request, user, access, value):
@@ -478,7 +590,8 @@ class AuthVerification:
                 except pymysql.err.IntegrityError as e:
                     logger.info(f"Access not added for {user}: {e}")
                     return False
-                return True
+        await self._bump_access_version(request, user)
+        return True
     # Delete Access Information, requires MySQL.  Returns True when removed.
     async def access_del(self, request, user, access, value):
         if not request.app.config.MYSQLAVAIL:
@@ -488,7 +601,10 @@ class AuthVerification:
                 query = 'DELETE FROM sanic_access WHERE user = %s AND access = %s AND value =%s'
                 values = (user, access, value,)
                 await cur.execute(query, values)
-                return cur.rowcount > 0
+                removed = cur.rowcount > 0
+        if removed:
+            await self._bump_access_version(request, user)
+        return removed
     # Show a user's access (via MySQL, or for the current user only, via session)
     async def access_show(self, request, user):
         if not request.app.config.MYSQLAVAIL:
@@ -500,7 +616,7 @@ class AuthVerification:
             async with conn.cursor(aiomysql.DictCursor) as cur:
                 info, access = await self._load_user(cur, user)
         if info is None:
-            return user, '', [], {}
+            return user, '', {}, {}
         return info['user'], '', info, access
     # Log on a user, if MySQL is available use the database to provide access levels
     # Otherwise they can be set from the function.  With MySQL the session
@@ -518,6 +634,9 @@ class AuthVerification:
             request.ctx.session['access_manual'] = True
             return user, apikey, info, access
         apikey = ''
+        # The version is read before the data, so a change made in between is
+        # noticed by the next verify()
+        version = await self._access_version(request, user)
         async with request.app.ctx.pool.acquire() as conn:
             async with conn.cursor(aiomysql.DictCursor) as cur:
                 info, access = await self._load_user(cur, user)
@@ -532,8 +651,13 @@ class AuthVerification:
         request.ctx.session['info'] = info
         request.ctx.session['user'] = user
         request.ctx.session['visit'] = time.time()
-        request.ctx.session.pop('access_at', None)
         request.ctx.session.pop('access_manual', None)
+        if version is not None:
+            request.ctx.session['access_version'] = version
+            request.ctx.session['access_at'] = time.time()
+        else:
+            request.ctx.session.pop('access_version', None)
+            request.ctx.session.pop('access_at', None)
         return user, apikey, info, access
 
 ###############################################################################
@@ -543,6 +667,12 @@ def reply(request, success, data, status=200, error=None):
     if error:
         body['error'] = error
     return json(body, status=status)
+
+@app.middleware("response")
+async def remember_banner(request, res):
+    if getattr(request.ctx, 'banner_shown', False):
+        res.add_cookie(AuthVerification.BANNER_COOKIE, '1', path='/', secure=True, httponly=True,
+                       samesite=session_samesite)
 
 @app.listener('before_server_start')
 async def setup_auth(app):

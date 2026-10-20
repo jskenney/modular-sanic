@@ -11,10 +11,7 @@ async def system_deauth(request):
     Log off and invalidate current session.
     """
     await request.app.ctx.auth.logoff(request)
-    message = ""
-    if not request.ctx.session.get('motd'):
-        message = request.app.ctx.auth.setting(request, 'AUTH_MESSAGE')
-        request.ctx.session['motd'] = True
+    message = request.app.ctx.auth.banner(request)
     page_title = request.app.ctx.auth.setting(request, 'AUTH_TITLE')
     res = request.app.ctx.reply(request, True, {'apikey': None, 'username': None, 'access': {}, 'info': {}, 'redirect': request.app.ctx.auth.setting(request, 'REDIRECT_LOGOFF'), 'logo': request.app.ctx.auth.setting(request, 'LOGON_LOGO'), 'message': message, 'page_title': page_title})
     return res
@@ -39,10 +36,7 @@ async def system_info(request):
     redirect = request.app.ctx.auth.setting(request, 'REDIRECT_LOGON_FAILED')
     if ok:
         redirect = request.app.ctx.auth.setting(request, 'REDIRECT_LOGON_SUCCESSFUL')
-    message = ""
-    if not request.ctx.session.get('motd'):
-        message = request.app.ctx.auth.setting(request, 'AUTH_MESSAGE')
-        request.ctx.session['motd'] = True
+    message = request.app.ctx.auth.banner(request)
     page_title = ''
     if request.app.ctx.auth.setting(request, 'AUTH_TITLE'):
         page_title = request.app.ctx.auth.setting(request, 'AUTH_TITLE')
@@ -55,14 +49,14 @@ async def system_refresh(request):
     """
     Refresh current logged on users access and info, reloads from database, returns same information as /auth/info.
     """
-    message = ""
-    if not request.ctx.session.get('motd'):
-        message = request.app.ctx.auth.setting(request, 'AUTH_MESSAGE')
-        request.ctx.session['motd'] = True
+    message = request.app.ctx.auth.banner(request)
     page_title = request.app.ctx.auth.setting(request, 'AUTH_TITLE')
     ok, username, apikey, access, info = await request.app.ctx.auth.verify(request)
-    if ok:
+    # Without MySQL (or for access given by the application) there is nothing
+    # to reload: keep the session's access and info
+    if ok and request.app.config.MYSQLAVAIL and not request.ctx.session.get('access_manual'):
         user, apikey, info, access = await request.app.ctx.auth.logon(request, username)
+    if ok:
         redirect = request.app.ctx.auth.setting(request, 'REDIRECT_LOGON_SUCCESSFUL')
         res = request.app.ctx.reply(request, ok, {'apikey': apikey, 'username': username, 'access': access, 'info': info, 'redirect': redirect, 'logo': request.app.ctx.auth.setting(request, 'LOGON_LOGO'), 'message': message, 'page_title': page_title})
     else:
