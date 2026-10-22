@@ -1,5 +1,8 @@
 sanic
 sanic-ext
+# sanic-ext imports pydantic (without it /docs and any endpoint using
+# sanic_ext.openapi fail to load) but does not declare it
+pydantic
 aiomysql
 # PyMySQL (used by aiomysql) needs it for MySQL 8's caching_sha2_password and
 # sha256_password logins
