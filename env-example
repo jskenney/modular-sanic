@@ -2,7 +2,8 @@
 APP_NAME=SanicApp
 API_LOCATIONS=api/auth/general,api/auth/switchuser,api/auth/pam,api/auth/apikey,api/auth/email
 #HSTS=86400
-# Add includeSubDomains to the HSTS header
+# Add includeSubDomains to the HSTS header (off by default; every subdomain
+# must then support HTTPS)
 #HSTS_INCLUDE_SUBDOMAINS=True
 # Content-Security-Policy for every page except /docs (empty to disable)
 #CONTENT_SECURITY_POLICY=default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'
@@ -30,6 +31,9 @@ DB_POOL_MAX=10
 # Memcached Connection Settings
 MEMCACHED_HOST=127.0.0.1
 MEMCACHED_PORT=11211
+# Stop at startup when memcached is unavailable (instead of using in-memory
+# sessions, which are not shared between workers)
+#MEMCACHED_REQUIRED=True
 
 # The following values are located relative to server.py's filesystem location
 # Note the intial page will be 'HTML'/index.html to follow convention
@@ -70,8 +74,11 @@ APIKEY_VALID=31536000
 # Generating an API key requires a logon within this many seconds
 AUTH_REKEY_WINDOW=900
 # Seconds a session may reuse its access before re-reading it from the
-# database (0 re-reads it on every request, so changes apply immediately)
-ACCESS_CACHE_SECONDS=0
+# database.  With memcached, access changed through the app applies at once
+# (a per-user access version), so this only bounds how long changes made
+# directly in the database take (default 300).  Without memcached the default
+# is 0: access is re-read on every request.
+#ACCESS_CACHE_SECONDS=300
 # PAM service used for /auth/pam (e.g. a service restricted to an allowed group)
 PAM_SERVICE=login
 # Sign on Banner / Consent Banner

@@ -4,8 +4,8 @@ Using Sanic (https://sanic.dev, https://github.com/sanic-org/sanic) as the core,
 
 # Initial Setup
 
-This software requires various Python libraries to operate, see requirements.txt.
-A simple start.sh script is provided to create a demo Python virtual environment (venv) location and install the python packages via pip.  The first run of start.sh installs the packages; run it again to start the server:
+This software requires various Python libraries to operate, see requirements.txt.  `requirements.lock` lists the exact versions they were last tested with, for reproducible installs (`pip install -r requirements.lock`).
+A simple start.sh script is provided to create a demo Python virtual environment (venv) location and install the python packages via pip.  The first run of start.sh installs the packages, then starts the server:
 
 - `./start.sh` starts a development server (debug output and auto reload) that only listens on `127.0.0.1`.  Browse to `http://localhost:8000`.  Debug responses include tracebacks, so do not expose this mode to other machines.
 - `CERT=... KEY=... ./start.sh production` is a production example: no debug or auto reload, TLS on all interfaces (port `PORT`, default 8443), `WORKERS` workers (default 2).
@@ -26,7 +26,7 @@ The session cookie is named `__Host-session` and is marked `Secure`, so browsers
 sanic server --host=server.example.com --cert=../ssl/bundle.crt --key=../ssl/bundle.key
 ```
 
-or run it behind a reverse proxy that terminates TLS.  `setup/install-443-redirect.sh` redirects port 443 to Sanic's default port 8000.
+or run it behind a reverse proxy that terminates TLS.  `setup/install-443-redirect.sh` redirects port 443 to the production port (`PORT`, default 8443).
 
 ## Running behind a reverse proxy
 
@@ -51,7 +51,7 @@ INSERT INTO sanic_access (user, access, value) VALUES
   ('alice', 'admin', 'become');        -- may switch to (su) other users
 ```
 
-Access is re-read from the database on every authenticated request (see `ACCESS_CACHE_SECONDS`), so grants and removals apply immediately, including to sessions that are already logged on.  After that, further access can be managed with the `/auth/<apikey>/access/...` endpoints.
+Access granted or removed through the app (the `/auth/<apikey>/access/...` endpoints, `auth.access_add` and `auth.access_del`, or a new API key) applies immediately, including to sessions that are already logged on: each change updates a per-user access version in memcached, and a session re-reads its access from the database (one query) when the version changed.  Changes made directly in the database apply within `ACCESS_CACHE_SECONDS` (300 seconds by default with memcached).  Without memcached, access is re-read on every authenticated request.  After that, further access can be managed with the `/auth/<apikey>/access/...` endpoints.
 
 ## User names
 
@@ -90,7 +90,7 @@ Endpoint files get everything they need from `request.app.ctx`:
 | `request.app.ctx.mc` | aiomcache client, present when memcached is available |
 | `request.app.config.MYSQLAVAIL` / `MEMCACHEAVAIL` | Whether the database / memcached are available |
 | `request.app.config.env` | The `environs` reader for configuration values |
-| `request.ctx.session` | The user's session (a dict) |
+| `request.ctx.session` | The user's session (a dict of JSON values; changes inside nested lists and dicts are saved too).  Static files get an empty session that is not saved |
 
 A typical endpoint that requires a logged on user with a particular access:
 
@@ -119,7 +119,7 @@ async def summary(request):
 
 Things to know:
 
-- `auth.verify(request)` checks the web session and returns `(ok, username, apikey, access, info)`.  With the database available, `access` and `info` are re-read from it, so they are always current.
+- `auth.verify(request)` checks the web session and returns `(ok, username, apikey, access, info)`.  With the database available, `access` and `info` are re-read from it whenever they changed through the app (and at least every `ACCESS_CACHE_SECONDS`), so they are current.
 - `auth.verifyapi(request, key)` accepts an API key.  The key is read from an `Authorization: Bearer <key>` header when one is sent, otherwise from `key` (for example a URL segment).  A key of `session`, `-` or an empty string checks the web session instead.  Any other key is checked against the database, and the session is neither used nor changed.
 - `access` is a dict that maps an access name to a list of values, for example `{'admin': ['permissions', 'become'], 'reports': ['read']}`.  Rows in `sanic_access` are `(user, access, value)`.
 - `info` is the user's `sanic_info` row (`user`, `fullname`, `department`, and the API key's `apikey_created` / `apikey_expires` times; the key itself is never included).
@@ -185,20 +185,21 @@ Settings are read from the environment or a `.env` file (see `env-example`).  Fi
 | `PAGE_500` | `./errors/500.html` | Page for unhandled server errors (used when the file exists; one is included) |
 | `DOCUMENTATION` | `False` | Serve the generated API documentation at `/docs` |
 | `HSTS` | not set | When set, the `max-age` in seconds for the Strict-Transport-Security header (HTTPS only) |
-| `HSTS_INCLUDE_SUBDOMAINS` | `True` | Add `includeSubDomains` to the HSTS header |
+| `HSTS_INCLUDE_SUBDOMAINS` | `False` | Add `includeSubDomains` to the HSTS header (every subdomain must then support HTTPS) |
 | `CONTENT_SECURITY_POLICY` | self-only policy; inline scripts allowed by hash, inline styles allowed | Content-Security-Policy header for every page except `/docs`; empty to disable |
 | `REFERRER_POLICY` | `strict-origin-when-cross-origin` | Referrer-Policy header |
 | `DB_HOST`, `DB_PORT` | `127.0.0.1`, `3306` | MySQL/MariaDB server |
 | `DB_USER`, `DB_PASS`, `DB_NAME` | `username`, `password`, `dbname` | MySQL/MariaDB credentials and database |
 | `DB_POOL_MAX` | `10` | Largest number of pooled database connections per worker |
-| `MEMCACHED_HOST`, `MEMCACHED_PORT` | `127.0.0.1`, `11211` | memcached server (sessions and rate limits) |
+| `MEMCACHED_HOST`, `MEMCACHED_PORT` | `127.0.0.1`, `11211` | memcached server (sessions, rate limits and access versions) |
+| `MEMCACHED_REQUIRED` | `False` | Stop at startup when memcached is unavailable, instead of falling back to in-memory sessions |
 | `SAMESITE` | `Strict` | Session cookie SameSite setting (`Strict`, `Lax` or `None`) |
 | `AUTH_VALID` | `604800` | Seconds of inactivity before a session expires (memcached keeps sessions at most 30 days) |
 | `AUTH_MAX` | `2592000` | Seconds after logon before a session expires, regardless of activity |
 | `AUTH_RATE_LIMIT`, `AUTH_RATE_WINDOW` | `10`, `300` | Logon attempts allowed per client address and per username in each window (seconds) |
 | `APIKEY_VALID` | `31536000` | Seconds before a generated API key expires (`0` for never) |
 | `AUTH_REKEY_WINDOW` | `900` | Generating an API key requires a logon within this many seconds |
-| `ACCESS_CACHE_SECONDS` | `0` | Seconds a session may reuse its access before re-reading it from the database (`0` re-reads every request) |
+| `ACCESS_CACHE_SECONDS` | `300` with memcached, `0` without | Seconds a session may reuse its access before re-reading it from the database (`0` re-reads every request).  With memcached, access changed through the app applies at once (see [Creating the first administrator](#creating-the-first-administrator)); this only bounds how long changes made directly in the database take |
 | `SANIC_PROXIES_COUNT`, `SANIC_REAL_IP_HEADER`, `SANIC_FORWARDED_SECRET` | not set | Trust a reverse proxy's forwarded headers (see [Running behind a reverse proxy](#running-behind-a-reverse-proxy)) |
 | `PAM_SERVICE` | `login` | PAM service used by `/auth/pam` |
 | `REDIRECT_LOGON_SUCCESSFUL` | `/index.html` | Redirect after a successful logon |
@@ -206,10 +207,10 @@ Settings are read from the environment or a `.env` file (see `env-example`).  Fi
 | `REDIRECT_LOGOFF` | `/index.html` | Redirect after logoff |
 | `CHALLENGE_PAGE` | `/logon/challenge.html` | Page for email challenges |
 | `LOGON_LOGO` | `/logon/logo.webp` | Image shown on the logon pages |
-| `AUTH_MESSAGE` | empty | Sign on / consent banner shown on the logon pages (HTML) |
+| `AUTH_MESSAGE` | empty | Sign on / consent banner shown on the logon pages (HTML), once per browser session (remembered in a `__Host-banner` cookie) |
 | `AUTH_TITLE` | `SanicApp` | Logon page title and challenge email subject |
 | `AUTH_EMAILER` | `noreply@example.com` | Challenge email sender |
 | `AUTH_DOMAIN` | `example.com` | Challenge emails go to `<username>@<AUTH_DOMAIN>` (a leading `@` is allowed) |
 | `AUTH_EMAIL_SERVER` | `localhost` | SMTP server for challenge emails |
 
-Without memcached the server falls back to in-memory sessions, which are not shared between workers.  Without the database, PAM logons still work, but API keys, email challenges, switching users and managing access are unavailable (they return 503, or 403 when the session has no access).
+Without memcached the server falls back to in-memory sessions, which are not shared between workers (a warning is logged; set `MEMCACHED_REQUIRED=True` to stop instead).  If memcached fails while the server runs, logons and other rate-limited requests are refused with a 503 rather than checked without a limit, and a session that cannot be saved returns a 503 JSON error.  If the database fails while the server runs, requests that need it return a 503 JSON error until it is back.  Without the database, PAM logons still work, but API keys, email challenges, switching users and managing access are unavailable (they return 503, or 403 when the session has no access).
