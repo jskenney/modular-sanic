@@ -134,7 +134,7 @@ Things to know:
 
 API keys are stored as a SHA-256 hash, so a key is only shown once, in the response to `POST /auth/rekey` (or with the Generate new API key button on `/index.html`).  Generating a new key replaces the old one, and requires a logon within the last `AUTH_REKEY_WINDOW` seconds (15 minutes by default), so a stolen session cannot be turned into a long-lived key.  Keys expire `APIKEY_VALID` seconds after they are generated (one year by default, `0` for never).
 
-Send a key as an `Authorization: Bearer <key>` header with `-` in place of `<apikey>` in the path, for example `curl -H "Authorization: Bearer $KEY" https://server/auth/-/access/list/alice`.  Keys placed in a URL end up in server and proxy logs and browser history.
+Send a key as an `Authorization: Bearer <key>` header with `-` in place of `<apikey>` in the path, for example `curl -H "Authorization: Bearer $KEY" https://server/auth/-/access/list/alice`.  Keys placed in a URL end up in server and proxy logs and browser history (responses never echo them: `endpoint` shows `<apikey>`).  Set `APIKEY_IN_PATH=False` to accept keys only in the header; a path value can then only be `-` or `session`.
 
 Databases created before keys were hashed need `setup/migrate_apikey_hash.sql`, run once.  It hashes the existing keys, which keep working with no expiry.
 
@@ -152,7 +152,7 @@ All responses use the JSON envelope described above.  Failed logons return 401, 
 | POST | `/auth/apikey` | JSON: `username`, `apikey` | API key logon |
 | POST | `/auth/apifile` | multipart: `files[]` (a file containing the key) | API key file logon |
 | POST | `/auth/request/challenge` | JSON: `username` | Email a 7 digit logon code to `username` + `AUTH_DOMAIN` |
-| POST | `/auth/challenge` | JSON: `username`, `challenge` | Log on with the emailed code |
+| POST | `/auth/challenge` | JSON: `username`, `challenge` | Log on with the emailed code (only its SHA-256 hash is stored; codes expire after 10 minutes and 10 attempts) |
 | POST | `/auth/deauth` | | Log off |
 | GET | `/auth/key` | | Current user and access (401 when logged off) |
 | GET | `/auth/info` | | Current user plus site settings used by the logon pages (always 200) |
@@ -181,8 +181,11 @@ Settings are read from the environment or a `.env` file (see `env-example`).  Fi
 | `HTML` | `./html/` | Static site served at `/` |
 | `FAVICON` | `./html/favicon.ico` | Site icon |
 | `SHOW_SITE_CONTENTS` | `False` | Directory listings for static directories without an index.html |
-| `PAGE_404` | `./errors/404.html` | Page for not found errors (used when the file exists) |
-| `PAGE_500` | `./errors/500.html` | Page for unhandled server errors (used when the file exists; one is included) |
+| `PAGE_404` | `./errors/404.html` | Page for not found errors shown to browsers (used when the file exists) |
+| `PAGE_500` | `./errors/500.html` | Page for unhandled server errors shown to browsers (used when the file exists; one is included) |
+| `API_PATHS` | `/auth/,/api/` | Path prefixes whose errors (404, 405, 413, 500, ...) are returned as the JSON envelope instead of an HTML page; requests that accept JSON but not HTML get JSON anywhere |
+| `REQUEST_MAX_SIZE` | `1048576` | Largest request body in bytes (Sanic's own default is 100 MB); raise it for extensions that take uploads |
+| `APIKEY_IN_PATH` | `True` | Accept API keys in URL paths; `False` accepts them only in an `Authorization: Bearer` header |
 | `DOCUMENTATION` | `False` | Serve the generated API documentation at `/docs` |
 | `HSTS` | not set | When set, the `max-age` in seconds for the Strict-Transport-Security header (HTTPS only) |
 | `HSTS_INCLUDE_SUBDOMAINS` | `False` | Add `includeSubDomains` to the HSTS header (every subdomain must then support HTTPS) |

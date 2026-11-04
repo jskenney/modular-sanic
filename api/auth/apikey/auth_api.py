@@ -21,7 +21,6 @@ async def system_apikey(request):
     user, apikey = fields
     if await request.app.ctx.auth.throttled(request, 'logon', user):
         return request.app.ctx.reply(request, False, {'username': user, 'apikey': '', 'access': {}, 'info': {}, 'redirect': request.app.ctx.auth.setting(request, 'REDIRECT_LOGON_FAILED')}, status=429, error="Too many attempts, please wait and try again.")
-    await request.app.ctx.auth.logoff(request)
     async with request.app.ctx.pool.acquire() as conn:
         async with conn.cursor(aiomysql.DictCursor) as cur:
             query = 'SELECT user FROM sanic_info WHERE user = %s AND apikey = %s AND (apikey_expires IS NULL OR apikey_expires > NOW())'
@@ -32,9 +31,11 @@ async def system_apikey(request):
             await cur.execute(query, values)
             info = await cur.fetchall()
     if len(info) == 0:
-        res = request.app.ctx.reply(request, False, {'username': user, 'apikey': apikey, 'access': access, 'info': info, 'redirect': request.app.ctx.auth.setting(request, 'REDIRECT_LOGON_SUCCESSFUL')}, status=401)
+        res = request.app.ctx.reply(request, False, {'username': user, 'apikey': apikey, 'access': access, 'info': info, 'redirect': request.app.ctx.auth.setting(request, 'REDIRECT_LOGON_FAILED')}, status=401)
         return res
-    # Log on after the connection is returned, logon() uses its own connection
+    # Log on after the connection is returned, logon() uses its own connection.
+    # Only a correct key replaces the current session (starting empty).
+    await request.app.ctx.auth.logoff(request)
     user, apikey, info, access = await request.app.ctx.auth.logon(request, info[0]['user'])
     res = request.app.ctx.reply(request, True, {'username': user, 'apikey': apikey, 'access': access, 'info': info, 'redirect': request.app.ctx.auth.setting(request, 'REDIRECT_LOGON_SUCCESSFUL')})
     return res
@@ -98,7 +99,6 @@ async def system_apifile(request):
     if len(uuids) != 1:
         return reply(request, False, {}, status=400, error="Unable to find the appropriate API key")
     uuids = uuids[0]
-    await request.app.ctx.auth.logoff(request)
     async with request.app.ctx.pool.acquire() as conn:
         async with conn.cursor(aiomysql.DictCursor) as cur:
             query = 'SELECT user FROM sanic_info WHERE apikey=%s AND (apikey_expires IS NULL OR apikey_expires > NOW())'
@@ -107,6 +107,8 @@ async def system_apifile(request):
             info = await cur.fetchall()
             if len(info) == 0:
                 return reply(request, False, {}, status=401, error="API key that was sent was invalid.")
+    # Only a correct key replaces the current session (starting empty)
+    await request.app.ctx.auth.logoff(request)
     user, apikey, info, access = await request.app.ctx.auth.logon(request, info[0]['user'])
     res = reply(request, True, {'username': user, 'apikey': apikey, 'access': access, 'info': info, 'redirect': request.app.ctx.auth.setting(request, 'REDIRECT_LOGON_SUCCESSFUL')})
     return res

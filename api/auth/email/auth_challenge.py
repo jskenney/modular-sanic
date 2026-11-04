@@ -19,7 +19,6 @@ async def system_challenge(request):
     failed = {'username': None, 'apikey': '', 'access': {}, 'info': {}, 'redirect': request.app.ctx.auth.setting(request, 'REDIRECT_LOGON_FAILED')}
     if await request.app.ctx.auth.throttled(request, 'logon', user):
         return request.app.ctx.reply(request, False, failed, status=429, error="Too many attempts, please wait and try again.")
-    await request.app.ctx.auth.logoff(request)
     async with request.app.ctx.pool.acquire() as conn:
         async with conn.cursor(aiomysql.DictCursor) as cur:
             # Count the attempt before checking it, in one statement, so concurrent
@@ -32,12 +31,17 @@ async def system_challenge(request):
             query = 'SELECT expect FROM sanic_challenge WHERE user=%s'
             await cur.execute(query, values)
             info = await cur.fetchone()
-            if not info or not secrets.compare_digest(str(info['expect']).encode(), token.encode()):
+            # Codes are stored as SHA-256 hashes (see auth_email.py)
+            expected = request.app.ctx.auth.hashkey(token)
+            if not info or not secrets.compare_digest(str(info['expect']).encode(), expected.encode()):
                 return request.app.ctx.reply(request, False, failed, status=401)
             query = 'DELETE FROM sanic_challenge WHERE user=%s'
             values = (user,)
             await cur.execute(query, values)
-    # Log on after the connection is returned, logon() uses its own connection
+    # Log on after the connection is returned, logon() uses its own connection.
+    # A failed attempt leaves the current session alone; a successful one
+    # starts from an empty session, so nothing from the previous identity stays.
+    await request.app.ctx.auth.logoff(request)
     user, apikey, info, access = await request.app.ctx.auth.logon(request, user)
     res = request.app.ctx.reply(request, True, {'username': user, 'apikey': apikey, 'access': access, 'info': info, 'redirect': request.app.ctx.auth.setting(request, 'REDIRECT_LOGON_SUCCESSFUL')})
     return res

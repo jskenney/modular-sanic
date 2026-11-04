@@ -17,6 +17,12 @@ API_LOCATIONS=api/auth/general,api/auth/switchuser,api/auth/pam,api/auth/apikey,
 #SANIC_REAL_IP_HEADER=x-real-ip
 #SANIC_FORWARDED_SECRET=a-shared-secret
 #DOCUMENTATION=False
+# Path prefixes whose errors are returned as JSON instead of an HTML page
+#API_PATHS=/auth/,/api/
+# Largest request body in bytes (default 1 MB)
+#REQUEST_MAX_SIZE=1048576
+# Accept API keys in URL paths (False: only in an Authorization: Bearer header)
+#APIKEY_IN_PATH=True
 SHOW_SITE_CONTENTS=True
 
 # MySQL Connection Settings

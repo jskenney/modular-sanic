@@ -17,10 +17,11 @@ async def system_pamauth(request):
     failed = {'username': None, 'apikey': apikey, 'access': {}, 'info': {}, 'redirect': request.app.ctx.auth.setting(request, 'REDIRECT_LOGON_FAILED')}
     if await request.app.ctx.auth.throttled(request, 'logon', u or ''):
         return request.app.ctx.reply(request, False, failed, status=429, error="Too many attempts, please wait and try again.")
-    await request.app.ctx.auth.logoff(request)
     # PAM blocks (including its failure delay), so run it off the event loop with its own handle
     service = request.app.ctx.auth.setting(request, 'PAM_SERVICE')
     if u and p and await asyncio.to_thread(pam.pam().authenticate, u, p, service=service):
+        # Only a successful logon replaces the current session (starting empty)
+        await request.app.ctx.auth.logoff(request)
         user, apikey, info, access = await request.app.ctx.auth.logon(request, u)
         res = request.app.ctx.reply(request, True, {'username': user, 'apikey': apikey, 'access': access, 'info': info, 'redirect': request.app.ctx.auth.setting(request, 'REDIRECT_LOGON_SUCCESSFUL')})
     else:
