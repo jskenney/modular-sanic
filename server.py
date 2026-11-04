@@ -5,7 +5,7 @@ from sanic.exceptions import NotFound, SanicException
 from sanic.response import json, html
 from sanic.log import logger
 from datetime import datetime, timezone
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, unquote
 from sanic_session import Session, MemcacheSessionInterface, InMemorySessionInterface
 import aiomysql, aiomcache, pymemcache
 import os, importlib.util, time, uuid, sys, environs, hashlib, re, base64, collections
@@ -31,6 +31,12 @@ if env_path:
 app = Sanic(env.str("APP_NAME", default="SanicApp"))
 app.config.env = env
 
+# Largest request body accepted, 1 MB by default (Sanic's own default is
+# 100 MB, which lets a few anonymous requests use gigabytes of memory).
+# REQUEST_MAX_SIZE (or SANIC_REQUEST_MAX_SIZE) raises it for uploads.
+if 'SANIC_REQUEST_MAX_SIZE' not in os.environ:
+    app.config.REQUEST_MAX_SIZE = env.int('REQUEST_MAX_SIZE', default=1048576)
+
 ###############################################################################
 # Enable Session Support (Default to Memcached interface),
 # use in-memory model if Memcached is unavailable (or stop, with
@@ -55,14 +61,18 @@ def static_request(request):
     return request.route is not None and request.route.name in (f'{app.name}.static', f'{app.name}.favicon')
 def session_store_error(request, exception):
     return reply(request, False, {}, status=exception.status, error=exception.message)
-session_options = dict(samesite=session_samesite, secure=True, cookie_name="__Host-session", expiry=session_expiry)
+# refresh_interval=0: no sliding-expiry rewrites of unchanged sessions.  verify()
+# already rewrites 'visit' every minute for logged on users, and sanic-session
+# 0.10.0's refresh can overwrite a change another request saved meanwhile.
+session_options = dict(samesite=session_samesite, secure=True, cookie_name="__Host-session", expiry=session_expiry,
+                       refresh_interval=0)
 try:
     test_client = pymemcache.client.base.Client((memcached_host, memcached_port), connect_timeout=2, timeout=2)
     test_client.get('user')
     test_client.close()
     memcache_client = aiomcache.Client(memcached_host, memcached_port)
     session_interface = MemcacheSessionInterface(memcache_client, **session_options)
-    print("Notice: Using Memcached Session Handling")
+    logger.info("Using memcached session handling")
     app.config.MEMCACHEAVAIL = True
 except Exception as e:
     if app.config.env.bool('MEMCACHED_REQUIRED', default=False):
@@ -73,7 +83,7 @@ except Exception as e:
     logger.warning(f"Memcached at {memcached_host}:{memcached_port} is unavailable ({type(e).__name__}: {e}), "
                    "using in-memory sessions: they are lost on restart and not shared between workers, "
                    "and rate limits are per worker.  Set MEMCACHED_REQUIRED=True to stop instead.")
-    print("Notice: Using InMemory Session Handling")
+    logger.info("Using in-memory session handling")
     app.config.MEMCACHEAVAIL = False
 Session(app, interface=session_interface, ignore=static_request, on_store_error=session_store_error)
 
@@ -90,29 +100,40 @@ app.static("/favicon.ico",
            name='favicon')
 
 ###############################################################################
-# Support providing a file not found page to the user vice a 404
-# (the pages are read once at startup)
-page_404 = app.config.env.str('PAGE_404', default='./errors/404.html')
-if os.path.exists(page_404):
-    print("Notice: Configuring Page 404.")
-    with open(page_404) as f:
-        page_404_html = f.read()
-    @app.exception(NotFound)
-    async def handle_not_found(request, exception):
-        return html(page_404_html, status=404)
+# Error responses.  API clients (paths starting with one of API_PATHS, or
+# requests that accept JSON but not HTML) get the JSON envelope; browsers get
+# the PAGE_404 and PAGE_500 pages when they exist (read once at startup),
+# otherwise Sanic's own error pages.
+api_paths = tuple(app.config.env.list('API_PATHS', default=['/auth/', '/api/']))
+def wants_json(request):
+    accept = request.headers.get('accept', '')
+    return request.path.startswith(api_paths) or ('application/json' in accept and 'text/html' not in accept)
 
+def read_page(location, kind):
+    if not os.path.exists(location):
+        return None
+    logger.info(f"Using {location} for {kind} pages")
+    with open(location) as f:
+        return f.read()
+page_404 = app.config.env.str('PAGE_404', default='./errors/404.html')
+page_404_html = read_page(page_404, '404')
 page_500 = app.config.env.str('PAGE_500', default='./errors/500.html')
-if os.path.exists(page_500):
-    print("Notice: Configuring Page 500.")
-    with open(page_500) as f:
-        page_500_html = f.read()
-    @app.exception(Exception)
-    async def handle_server_errors(request, exception):
-        # Client errors (400, 405, 413, ...) keep Sanic's normal response
-        if isinstance(exception, SanicException) and exception.status_code < 500:
-            return request.app.error_handler.default(request, exception)
+page_500_html = read_page(page_500, '500')
+
+@app.exception(Exception)
+async def handle_errors(request, exception):
+    client_error = isinstance(exception, SanicException) and exception.status_code < 500
+    status = exception.status_code if isinstance(exception, SanicException) else 500
+    if not client_error:
         logger.error(f"Unhandled error on {request.path}", exc_info=exception)
+    if wants_json(request):
+        message = str(exception) if client_error else "The server was unable to complete the request."
+        return reply(request, False, {}, status=status, error=message)
+    if isinstance(exception, NotFound) and page_404_html is not None:
+        return html(page_404_html, status=404)
+    if not client_error and page_500_html is not None:
         return html(page_500_html, status=500)
+    return request.app.error_handler.default(request, exception)
 
 ###############################################################################
 # Database errors while running (MySQL stopped or unreachable) and a rate
@@ -135,12 +156,12 @@ async def handle_rate_limit_unavailable(request, exception):
 # Block documentation generation
 if not app.config.env.bool('DOCUMENTATION', default=False):
     app.config.OAS=False
-    print("Notice: Documentation is unavailable.")
+    logger.info("API documentation (/docs) is off")
 
 ###############################################################################
 # To support HSTS, a common organizational security requirement.
 if app.config.env.str('HSTS', default=''):
-    print("Notice: Set HSTS to", app.config.env.str('HSTS', default='86400'))
+    logger.info(f"HSTS max-age set to {app.config.env.str('HSTS', default='86400')}")
     hsts_value = "max-age="+app.config.env.str('HSTS', default='86400')
     if app.config.env.bool('HSTS_INCLUDE_SUBDOMAINS', default=False):
         hsts_value += "; includeSubDomains"
@@ -227,7 +248,7 @@ base_dir = os.path.dirname(os.path.abspath(__file__))
 for source in (app.config.env.list('API_LOCATIONS', default=['./api', './external'])):
     source = os.path.join(base_dir, source)
     if not os.path.isdir(source):
-        print("Notice: API location not found", source)
+        logger.warning(f"API location not found: {source}")
         continue
     for root, dirnames, filenames in os.walk(source):
         dirnames.sort()
@@ -246,7 +267,7 @@ for source in (app.config.env.list('API_LOCATIONS', default=['./api', './externa
                 spec.loader.exec_module(bp)
                 if not isinstance(getattr(bp, 'sub_bp', None), Blueprint):
                     del sys.modules[name]
-                    print("Notice: Skipped", filename, "(no sub_bp Blueprint defined)")
+                    logger.warning(f"Skipped {filename} (no sub_bp Blueprint defined)")
                     continue
                 if bp.sub_bp.name in app.blueprints:
                     raise ValueError(f'A blueprint named "{bp.sub_bp.name}" is already loaded, blueprint names must be unique.')
@@ -260,7 +281,7 @@ for source in (app.config.env.list('API_LOCATIONS', default=['./api', './externa
                 app.blueprint(bp.sub_bp)
             except Exception as e:
                 raise RuntimeError(f"Unable to register the blueprint from {filename}: {e}") from e
-            print("Notice: Loaded blueprint from", filename)
+            logger.info(f"Loaded blueprint from {filename}")
 
 ###############################################################################
 # The shared memcached client (also used by the sessions), closed at shutdown.
@@ -273,7 +294,7 @@ async def setup_memcache(app):
 async def close_memcache(app):
     if app.config.MEMCACHEAVAIL:
         await app.ctx.mc.close()
-        print("Notice: Memcached connection pool closed.")
+        logger.info("Memcached connection pool closed")
 
 ###############################################################################
 # Configure and connect to the MySQL database, this is optional but not having
@@ -291,18 +312,18 @@ async def setup_db(app):
             autocommit=True
         )
         app.config.MYSQLAVAIL = True
-        print("Notice: Database connection pool created.")
+        logger.info("Database connection pool created")
     except Exception as e:
         app.ctx.pool = None
         app.config.MYSQLAVAIL = False
-        print(f"Notice: Database connection failed: {type(e).__name__} | Message: {e}")
+        logger.warning(f"Database connection failed, running without it: {type(e).__name__} | Message: {e}")
 
 @app.listener('after_server_stop')
 async def close_db(app):
     if app.config.MYSQLAVAIL:
         app.ctx.pool.close()
         await app.ctx.pool.wait_closed()
-        print("Notice: Database connection pool closed.")
+        logger.info("Database connection pool closed")
 
 ###############################################################################
 # Configure global Authentication & Verification methods, this depends
@@ -536,10 +557,15 @@ class AuthVerification:
     # header when one is sent, otherwise from mykey (e.g. the URL).  A key of
     # 'session', '-' or '' checks the web session only; any other key is checked
     # against the database and the session is not used or changed.
+    # With APIKEY_IN_PATH=False only the header is accepted for keys (keys in
+    # URLs end up in access logs, proxy logs and browser history); the path
+    # value can then only select the web session.
     async def verifyapi(self, request, mykey):
         header = request.headers.get('authorization', '')
         if header[:7].lower() == 'bearer ':
             mykey = header[7:].strip()
+        elif mykey not in self.SESSION_KEYS and not request.app.config.env.bool('APIKEY_IN_PATH', default=True):
+            return False, None, None, {}, {}
         if mykey in self.SESSION_KEYS:
             return await self.verify(request)
         if not request.app.config.MYSQLAVAIL:
@@ -661,9 +687,16 @@ class AuthVerification:
         return user, apikey, info, access
 
 ###############################################################################
-# Standard JSON response envelope used by the endpoints
+# Standard JSON response envelope used by the endpoints.  An API key in the
+# path (a route parameter named apikey) is never echoed back.
+def masked_path(request):
+    key = request.match_info.get('apikey') if request.route else None
+    if not key or key in AuthVerification.SESSION_KEYS:
+        return request.path
+    return '/'.join('<apikey>' if unquote(part) == key else part for part in request.path.split('/'))
+
 def reply(request, success, data, status=200, error=None):
-    body = {'success': success, 'sent': datetime.now(timezone.utc).isoformat(), 'endpoint': request.path, 'data': data}
+    body = {'success': success, 'sent': datetime.now(timezone.utc).isoformat(), 'endpoint': masked_path(request), 'data': data}
     if error:
         body['error'] = error
     return json(body, status=status)

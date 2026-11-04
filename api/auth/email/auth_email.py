@@ -29,11 +29,13 @@ async def system_request_challenge(request):
         return request.app.ctx.reply(request, False, {'redirect': redirect}, status=429, error="Too many attempts, please wait and try again.")
     # Generate a Token (7 digits)
     token = str(secrets.randbelow(10**7))
-    # Add the token to the database.  A new request does not reset the attempt
+    # Add the token's hash to the database (the code itself is only emailed).
+    # A new request does not reset the attempt
     # counter unless the previous challenge has expired (attempts is assigned
     # before sent, so it sees the previous sent time).
     query = 'INSERT INTO sanic_challenge (user, expect) VALUES (%s, %s) ON DUPLICATE KEY UPDATE attempts=IF(sent < NOW() - INTERVAL 10 MINUTE, 0, attempts), expect=%s, sent=NOW()'
-    values = (username, token, token, )
+    hashed = request.app.ctx.auth.hashkey(token)
+    values = (username, hashed, hashed, )
     ok = True
     async with request.app.ctx.pool.acquire() as conn:
         async with conn.cursor(aiomysql.DictCursor) as cur:
